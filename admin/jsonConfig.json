@@ -24,7 +24,7 @@
       "label": "Abfrageintervall",
       "help": "in Sekunden",
       "min": 5,
-      "default": 30,
+      "default": 60,
       "newLine": true,
       "xs": 12,
       "sm": 6,

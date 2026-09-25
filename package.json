@@ -1,0 +1,29 @@
+{
+  "name": "iobroker.victron-vrm",
+  "version": "0.1.0",
+  "description": "ioBroker Adapter für die Victron VRM API (Diagnostics)",
+  "author": "Jens",
+  "license": "MIT",
+  "homepage": "",
+  "keywords": [
+    "ioBroker",
+    "Victron",
+    "VRM",
+    "solar",
+    "energy"
+  ],
+  "main": "main.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.1.6",
+    "axios": "^1.7.7"
+  },
+  "devDependencies": {
+    "@iobroker/adapter-dev": "^1.3.0"
+  },
+  "scripts": {
+    "test": "echo \"noch keine Tests\" && exit 0"
+  }
+}

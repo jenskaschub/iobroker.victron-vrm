@@ -1,0 +1,90 @@
+{
+  "common": {
+    "name": "victron-vrm",
+    "version": "0.1.0",
+    "news": {
+      "0.1.0": {
+        "en": "initial version",
+        "de": "Erste Version"
+      }
+    },
+    "title": "Victron VRM",
+    "titleLang": {
+      "en": "Victron VRM",
+      "de": "Victron VRM"
+    },
+    "desc": {
+      "en": "Reads diagnostics data from the Victron VRM API and creates matching ioBroker objects with correct units and roles.",
+      "de": "Liest Diagnosedaten aus der Victron VRM API und legt passende ioBroker-Objekte mit korrekten Units und Rollen an."
+    },
+    "authors": [
+      "Jens"
+    ],
+    "keywords": [
+      "victron",
+      "vrm",
+      "solar",
+      "battery",
+      "energy"
+    ],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "mode": "daemon",
+    "compact": true,
+    "connectionType": "cloud",
+    "dataSource": "poll",
+    "materialize": false,
+    "icon": "victron-vrm.png",
+    "enabled": true,
+    "extIcon": "",
+    "type": "energy",
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=5.0.0"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=6.0.0"
+      }
+    ]
+  },
+  "native": {
+    "vrmToken": "",
+    "installationId": "",
+    "pollInterval": 30
+  },
+  "encryptedNative": [
+    "vrmToken"
+  ],
+  "protectedNative": [
+    "vrmToken"
+  ],
+  "objects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": {
+        "name": "Information"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "Verbindung zur VRM API",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    }
+  ]
+}

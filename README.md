@@ -50,8 +50,3 @@ Danach im Admin unter Instanzen → victron-vrm.0 → Konfiguration:
 Nach dem Start sollten unter `victron-vrm.0.*` die Objekte erscheinen,
 mit `info.connection` als Statusanzeige, ob die API erreichbar ist.
 
-## Bekannte offene Punkte für später
-
-- Auswahl/"Abonnieren" einzelner Datenpunkte statt alles zu übernehmen
-- Mehrere Installationen gleichzeitig
-- Feineres Role-Mapping über `dbusPath`

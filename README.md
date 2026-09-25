@@ -1,45 +1,33 @@
 # ioBroker.victron-vrm
 
-Ersetzt den bisherigen Node-RED-Flow für Victron-VRM-Diagnosedaten durch einen
-eigenständigen ioBroker-Adapter. Objekte bekommen dabei automatisch die
-richtige `common.unit` (aus `formatWithUnit`) und eine passende `common.role`
-statt der generischen Node-RED-Autocreate-Objekte.
+Adapter für die Victron VRM API (Diagnostics-Endpoint). Liest Messwerte einer
+VRM-Installation aus und legt dafür passende ioBroker-Objekte an – inklusive
+korrekter `common.unit` (aus `formatWithUnit`) und passender `common.role`,
+statt nur generischer Werte ohne Einheit.
 
-## Status
+Dieses Projekt steht in keiner Verbindung zu und wird nicht unterstützt von
+Victron Energy. "Victron" und "VRM" sind Marken von Victron Energy B.V.
+Die Nutzung der VRM API unterliegt den Bedingungen von Victron Energy
+(u. a. nicht für kommerzielle/professionelle Zwecke vorgesehen, ohne
+Support seitens Victron).
 
-Erste funktionsfähige Version. Noch offen / bewusst einfach gehalten:
+## Warum über die VRM API statt MQTT/Modbus?
 
-- Kein Devcontainer/Testgerüst von `@iobroker/create-adapter` – dieses Projekt
-  wurde von Hand nach dessen Struktur gebaut. Am einfachsten lässt sich das
-  nachträglich zusammenführen, indem man `@iobroker/create-adapter` in einem
-  leeren Ordner laufen lässt und die generierten Dev-/Testdateien
-  (`.devcontainer/`, `test/`, ESLint-Config) übernimmt.
-- Kein Adapter-Icon (`admin/victron-vrm.png`, 64x64px) – ohne Icon startet der
-  Adapter trotzdem, im Admin fehlt nur das Bildchen.
-- `common.role`-Mapping ist eine einfache Unit→Role-Tabelle
-  (`UNIT_ROLE_MAP` in `main.js`). Für differenziertere Rollen (z. B. anhand
-  von `dbusPath`/`dbusServiceType`) ist das der Ansatzpunkt zum Erweitern.
+Die meisten existierenden Victron-Integrationen (auch für ioBroker/Home
+Assistant) lesen die Daten lokal vom GX-Gerät (Cerbo GX o.ä.) per MQTT oder
+Modbus TCP aus – das setzt voraus, dass die Installation im selben lokalen
+Netz erreichbar ist. Dieser Adapter fragt stattdessen die Daten, die das
+GX-Gerät ohnehin an das VRM-Portal sendet, über die VRM-Cloud-API ab.
 
-## Installation im Codespace
+Das ist sinnvoll, wenn die Installation nicht im lokalen Netz hängt, sondern
+z. B. nur per Mobilfunk am VRM-Portal angebunden ist (wie im Ursprungsfall
+dieses Adapters: keine direkte lokale Erreichbarkeit, davor lief die
+Anbindung über MQTT mit ca. 3 GB Datenvolumen pro Monat und teils doppelt
+übertragenen Daten). Der Nachteil: Man ist auf das Poll-Intervall angewiesen
+statt auf Echtzeit-Pushes, und die Daten müssen erst den Umweg über die
+VRM-Cloud nehmen.
 
-```bash
-cd iobroker.victron-vrm
-npm install
-```
 
-## Lokal gegen eine laufende ioBroker-Instanz testen
-
-Am einfachsten über den ioBroker-eigenen Weg, einen Adapter aus einem
-Ordner zu installieren (auf dem ioBroker-Host, nicht im Codespace):
-
-```bash
-cd /opt/iobroker
-npm install <pfad-oder-git-url-zum-adapter-ordner>
-iobroker upload victron-vrm
-iobroker add victron-vrm
-```
-
-Danach im Admin unter Instanzen → victron-vrm.0 → Konfiguration:
 
 - **VRM Access Token**: VRM-Portal → Preferences → Integrations →
   Access tokens → neues Token erzeugen

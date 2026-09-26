@@ -22,6 +22,7 @@ class VictronVrm extends utils.Adapter {
         this.pollTimer = null;
         this.knownObjects = new Set();
         this.customNames = {};
+        this.enumStates = {};
 
         this.on('ready', this.onReady.bind(this));
         this.on('unload', this.onUnload.bind(this));
@@ -42,6 +43,11 @@ class VictronVrm extends utils.Adapter {
     }
 
     async poll() {
+        await this.pollDiagnostics();
+        await this.pollAlarms();
+    }
+
+    async pollDiagnostics() {
         const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.installationId}/diagnostics`;
 
         try {
@@ -65,6 +71,67 @@ class VictronVrm extends utils.Adapter {
             } else {
                 this.log.error(`VRM API Fehler: ${err.message}`);
             }
+        }
+    }
+
+    // Undokumentierter, aber durch Node-RED-Node und Drittanbieter-Clients bestätigter Endpoint.
+    // Feldnamen sind noch nicht final geklärt - Objekte werden daher generisch aus dem
+    // erstbesten Antwortformat abgeleitet und im Log protokolliert, damit wir bei Bedarf
+    // nachschärfen können.
+    async pollAlarms() {
+        const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.installationId}/alarms`;
+
+        try {
+            const response = await axios.get(url, {
+                headers: { 'X-Authorization': `Token ${this.config.vrmToken}` },
+                timeout: 15000
+            });
+
+            const alarms = (response.data && (response.data.records || response.data.alarms)) || [];
+            if (!Array.isArray(alarms)) {
+                this.log.warn('VRM-Alarme: unerwartetes Antwortformat - Rohantwort: ' + JSON.stringify(response.data).slice(0, 500));
+                return;
+            }
+
+            this.log.debug(`VRM-Alarme Rohantwort (${alarms.length} Einträge): ${JSON.stringify(alarms).slice(0, 1000)}`);
+            await this.processAlarms(alarms);
+        } catch (err) {
+            if (err.response) {
+                this.log.error(`VRM Alarme API Fehler ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`);
+            } else {
+                this.log.error(`VRM Alarme API Fehler: ${err.message}`);
+            }
+        }
+    }
+
+    async processAlarms(alarms) {
+        for (let i = 0; i < alarms.length; i++) {
+            const alarm = alarms[i];
+            const idPart = alarm.nid !== undefined ? alarm.nid : alarm.id !== undefined ? alarm.id : alarm.name || i;
+            const base = `Alarms.${this.cleanId(idPart)}`;
+
+            for (const [key, value] of Object.entries(alarm)) {
+                if (value === null || typeof value === 'object') {
+                    continue; // verschachtelte Objekte erstmal auslassen, bis Struktur klar ist
+                }
+
+                const path = `${base}.${this.cleanId(key)}`;
+                const type = typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'string';
+
+                if (!this.knownObjects.has(path)) {
+                    await this.setObjectNotExistsAsync(path, {
+                        type: 'state',
+                        common: { name: key, type, role: 'value', read: true, write: false },
+                        native: {}
+                    });
+                    this.knownObjects.add(path);
+                }
+                await this.setStateAsync(path, value, true);
+            }
+        }
+
+        if (alarms.length === 0) {
+            this.log.debug('VRM-Alarme: aktuell keine aktiven Alarme gemeldet.');
         }
     }
 
@@ -117,12 +184,20 @@ class VictronVrm extends utils.Adapter {
 
     async ensureObject(path, item, val) {
         if (this.knownObjects.has(path)) {
+            if (this.enumStates[path]) {
+                await this.maybeUpdateEnumState(path, val, item);
+            }
             return;
         }
+
+        // Objekt existiert eventuell schon aus einem früheren Adapter-Lauf -
+        // dessen common.states (gelernte Enum-Werte) übernehmen statt zu verlieren.
+        const existing = await this.getObjectAsync(path);
 
         const unit = this.parseUnit(item.formatWithUnit);
         const type = typeof val === 'number' ? 'number' : typeof val === 'boolean' ? 'boolean' : 'string';
         const role = this.guessRole(unit, item);
+        const isEnum = this.looksLikeEnum(unit, val, item);
 
         const common = {
             name: item.description || item.code || path,
@@ -135,7 +210,17 @@ class VictronVrm extends utils.Adapter {
             common.unit = unit;
         }
 
-        await this.setObjectNotExistsAsync(path, {
+        if (isEnum) {
+            const states = existing && existing.common && existing.common.states ? { ...existing.common.states } : {};
+            const key = String(val);
+            if (states[key] === undefined) {
+                states[key] = item.value.toString().trim();
+            }
+            common.states = states;
+            this.enumStates[path] = states;
+        }
+
+        const objDef = {
             type: 'state',
             common,
             native: {
@@ -143,9 +228,39 @@ class VictronVrm extends utils.Adapter {
                 dbusServiceType: item.dbusServiceType || '',
                 dbusPath: item.dbusPath || ''
             }
-        });
+        };
+
+        if (existing) {
+            await this.extendObjectAsync(path, objDef);
+        } else {
+            await this.setObjectNotExistsAsync(path, objDef);
+        }
 
         this.knownObjects.add(path);
+    }
+
+    // Erkennt zustandsartige numerische Felder wie Charge_state/MPPT_State: kein Unit,
+    // aber VRM liefert in item.value einen lesbaren Text zum Rohwert.
+    looksLikeEnum(unit, val, item) {
+        return (
+            !unit &&
+            typeof val === 'number' &&
+            typeof item.value === 'string' &&
+            item.value.trim() !== '' &&
+            item.value.trim() !== String(val)
+        );
+    }
+
+    async maybeUpdateEnumState(path, val, item) {
+        if (typeof item.value !== 'string') {
+            return;
+        }
+        const key = String(val);
+        const states = this.enumStates[path];
+        if (states[key] === undefined) {
+            states[key] = item.value.trim();
+            await this.extendObjectAsync(path, { common: { states } });
+        }
     }
 
     // formatWithUnit sieht z.B. so aus: "%.1f V" oder "%d %%" - letztes Token als Einheit nehmen.

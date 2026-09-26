@@ -23,6 +23,9 @@ class VictronVrm extends utils.Adapter {
         this.knownObjects = new Set();
         this.customNames = {};
         this.enumStates = {};
+        // Menge der aktuell aktiven Alarm-Basispfade (aus dem letzten Poll), damit wir
+        // beendete Alarme beim nächsten Poll gezielt auf false zurücksetzen können.
+        this.activeAlarmBases = new Set();
 
         this.on('ready', this.onReady.bind(this));
         this.on('unload', this.onUnload.bind(this));
@@ -44,7 +47,7 @@ class VictronVrm extends utils.Adapter {
 
     async poll() {
         await this.pollDiagnostics();
-        await this.pollAlarms();
+        await this.pollAlarmLog();
     }
 
     async pollDiagnostics() {
@@ -74,12 +77,11 @@ class VictronVrm extends utils.Adapter {
         }
     }
 
-    // Undokumentierter, aber durch Node-RED-Node und Drittanbieter-Clients bestätigter Endpoint.
-    // Feldnamen sind noch nicht final geklärt - Objekte werden daher generisch aus dem
-    // erstbesten Antwortformat abgeleitet und im Log protokolliert, damit wir bei Bedarf
-    // nachschärfen können.
-    async pollAlarms() {
-        const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.installationId}/alarms`;
+    // Alarm-Log-Endpoint - empirisch bestätigt (nicht offiziell dokumentiert), liefert die
+    // tatsächliche Historie inkl. isActive-Flag (im Gegensatz zum /alarms-Endpoint, der nur
+    // die konfigurierten Schwellwerte liefert).
+    async pollAlarmLog() {
+        const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.installationId}/alarm-log`;
 
         try {
             const response = await axios.get(url, {
@@ -87,52 +89,75 @@ class VictronVrm extends utils.Adapter {
                 timeout: 15000
             });
 
-            const alarms = (response.data && (response.data.records || response.data.alarms)) || [];
-            if (!Array.isArray(alarms)) {
-                this.log.warn('VRM-Alarme: unerwartetes Antwortformat - Rohantwort: ' + JSON.stringify(response.data).slice(0, 500));
+            const records = response.data && response.data.records;
+            if (!Array.isArray(records)) {
+                this.log.warn('VRM-Alarm-Log: unerwartetes Antwortformat - Rohantwort: ' + JSON.stringify(response.data).slice(0, 500));
                 return;
             }
 
-            this.log.debug(`VRM-Alarme Rohantwort (${alarms.length} Einträge): ${JSON.stringify(alarms).slice(0, 1000)}`);
-            await this.processAlarms(alarms);
+            await this.processAlarmLog(records);
         } catch (err) {
             if (err.response) {
-                this.log.error(`VRM Alarme API Fehler ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`);
+                this.log.error(`VRM Alarm-Log API Fehler ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`);
             } else {
-                this.log.error(`VRM Alarme API Fehler: ${err.message}`);
+                this.log.error(`VRM Alarm-Log API Fehler: ${err.message}`);
             }
         }
     }
 
-    async processAlarms(alarms) {
-        for (let i = 0; i < alarms.length; i++) {
-            const alarm = alarms[i];
-            const idPart = alarm.nid !== undefined ? alarm.nid : alarm.id !== undefined ? alarm.id : alarm.name || i;
-            const base = `Alarms.${this.cleanId(idPart)}`;
+    async processAlarmLog(records) {
+        const currentActiveBases = new Set();
 
-            for (const [key, value] of Object.entries(alarm)) {
-                if (value === null || typeof value === 'object') {
-                    continue; // verschachtelte Objekte erstmal auslassen, bis Struktur klar ist
-                }
+        for (const record of records) {
+            if (!record.isActive) {
+                continue;
+            }
 
-                const path = `${base}.${this.cleanId(key)}`;
-                const type = typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'string';
+            const base = this.alarmPathFor(record);
+            currentActiveBases.add(base);
 
-                if (!this.knownObjects.has(path)) {
-                    await this.setObjectNotExistsAsync(path, {
-                        type: 'state',
-                        common: { name: key, type, role: 'value', read: true, write: false },
-                        native: {}
-                    });
-                    this.knownObjects.add(path);
-                }
-                await this.setStateAsync(path, value, true);
+            await this.ensureSimpleState(`${base}.Active`, 'boolean', 'indicator.alarm', true);
+            await this.ensureSimpleState(`${base}.Description`, 'string', 'value', record.description || '');
+            if (record.started) {
+                await this.ensureSimpleState(`${base}.Since`, 'number', 'value.time', record.started * 1000);
             }
         }
 
-        if (alarms.length === 0) {
-            this.log.debug('VRM-Alarme: aktuell keine aktiven Alarme gemeldet.');
+        // Alarme, die beim letzten Poll noch aktiv waren, jetzt aber nicht mehr auftauchen -> löschen/false setzen.
+        for (const base of this.activeAlarmBases) {
+            if (!currentActiveBases.has(base)) {
+                await this.ensureSimpleState(`${base}.Active`, 'boolean', 'indicator.alarm', false);
+            }
         }
+
+        this.activeAlarmBases = currentActiveBases;
+    }
+
+    // Eigener, vom Diagnostics-Baum unabhängiger Zweig: Alarms.<Gerät>.<Name|Instanz>
+    // bzw. Alarms.<Typ>.<idAlarm> für Alarme ohne Gerätebezug (z.B. Geofence).
+    alarmPathFor(record) {
+        if (record.device) {
+            const deviceFolder = this.cleanId(record.device);
+            const sub = record.customName
+                ? this.cleanId(record.customName)
+                : record.instance !== null && record.instance !== undefined
+                    ? `Instanz_${record.instance}`
+                    : 'Allgemein';
+            return `Alarms.${deviceFolder}.${sub}`;
+        }
+        return `Alarms.${this.cleanId(record.type || 'Sonstige')}.${this.cleanId(record.idAlarm)}`;
+    }
+
+    async ensureSimpleState(path, type, role, value) {
+        if (!this.knownObjects.has(path)) {
+            await this.setObjectNotExistsAsync(path, {
+                type: 'state',
+                common: { name: path.split('.').pop(), type, role, read: true, write: false },
+                native: {}
+            });
+            this.knownObjects.add(path);
+        }
+        await this.setStateAsync(path, value, true);
     }
 
     async processRecords(records) {
@@ -159,7 +184,7 @@ class VictronVrm extends utils.Adapter {
             }
         }
 
-        // Durchgang 2: Objekte anlegen/aktualisieren und Werte schreiben.
+        // Durchgang 2: Objekte anlegen/aktualisieren, Werte schreiben, Attribut-Lookup füllen.
         for (const item of records) {
             const val = item.rawValue !== undefined && item.rawValue !== null ? item.rawValue : item.value;
             if (val === undefined || val === null) {
@@ -170,12 +195,12 @@ class VictronVrm extends utils.Adapter {
             const instanceNum = item.instance !== undefined ? item.instance : 0;
             const stateName = this.cleanId(item.description || item.code || 'Wert');
 
-            let path = deviceFolder;
+            let groupPath = deviceFolder;
             if (deviceInstances[deviceFolder].size > 1) {
                 const nameKey = `${deviceFolder}_${instanceNum}`;
-                path += `.${this.customNames[nameKey] || `Instanz_${instanceNum}`}`;
+                groupPath += `.${this.customNames[nameKey] || `Instanz_${instanceNum}`}`;
             }
-            path += `.${stateName}`;
+            const path = `${groupPath}.${stateName}`;
 
             await this.ensureObject(path, item, val);
             await this.setStateAsync(path, val, true);

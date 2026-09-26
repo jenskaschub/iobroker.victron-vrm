@@ -42,7 +42,7 @@ class VictronVrm extends utils.Adapter {
         const intervalSec = parseInt(this.config.pollInterval, 10) || 30;
 
         await this.poll();
-        this.pollTimer = setInterval(() => this.poll(), intervalSec * 1000);
+        this.pollTimer = this.setInterval(() => this.poll(), intervalSec * 1000);
     }
 
     async poll() {
@@ -165,7 +165,7 @@ class VictronVrm extends utils.Adapter {
 
         // Durchgang 1: welche Devices haben mehrere Instanzen? Custom-Names einsammeln.
         for (const item of records) {
-            const deviceFolder = this.cleanId(item.Device || 'System');
+            const deviceFolder = this.resolveDeviceFolder(item);
             const instanceNum = item.instance !== undefined ? item.instance : 0;
 
             if (!deviceInstances[deviceFolder]) {
@@ -191,7 +191,7 @@ class VictronVrm extends utils.Adapter {
                 continue;
             }
 
-            const deviceFolder = this.cleanId(item.Device || 'System');
+            const deviceFolder = this.resolveDeviceFolder(item);
             const instanceNum = item.instance !== undefined ? item.instance : 0;
             const stateName = this.cleanId(item.description || item.code || 'Wert');
 
@@ -205,6 +205,18 @@ class VictronVrm extends utils.Adapter {
             await this.ensureObject(path, item, val);
             await this.setStateAsync(path, val, true);
         }
+    }
+
+    // GPS läuft bei Victron intern als eigener Dienst (com.victronenergy.gps), auch wenn
+    // VRM ihn in der Anzeige oft unter "Gateway" mit gruppiert. Wir erkennen das über
+    // dbusServiceType statt über das (unzuverlässigere) Device-Label, und lösen GPS-Punkte
+    // in einen eigenen Zweig heraus. Ohne angeschlossenes GPS tauchen einfach keine
+    // passenden Einträge auf - der GPS-Zweig entsteht dann gar nicht erst.
+    resolveDeviceFolder(item) {
+        if (item.dbusServiceType && item.dbusServiceType.toLowerCase().includes('gps')) {
+            return 'GPS';
+        }
+        return this.cleanId(item.Device || 'System');
     }
 
     async ensureObject(path, item, val) {
@@ -314,7 +326,7 @@ class VictronVrm extends utils.Adapter {
     onUnload(callback) {
         try {
             if (this.pollTimer) {
-                clearInterval(this.pollTimer);
+                this.clearInterval(this.pollTimer);
                 this.pollTimer = null;
             }
             callback();

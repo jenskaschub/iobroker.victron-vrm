@@ -186,7 +186,7 @@ class VictronVrm extends utils.Adapter {
 
         // Durchgang 2: Objekte anlegen/aktualisieren, Werte schreiben, Attribut-Lookup füllen.
         for (const item of records) {
-            const val = item.rawValue !== undefined && item.rawValue !== null ? item.rawValue : item.value;
+            const val = item.rawValue !== undefined && item.rawValue !== null ? item.rawValue : item.formattedValue;
             if (val === undefined || val === null) {
                 continue;
             }
@@ -251,7 +251,7 @@ class VictronVrm extends utils.Adapter {
             const states = existing && existing.common && existing.common.states ? { ...existing.common.states } : {};
             const key = String(val);
             if (states[key] === undefined) {
-                states[key] = item.value.toString().trim();
+                states[key] = item.formattedValue.toString().trim();
             }
             common.states = states;
             this.enumStates[path] = states;
@@ -268,34 +268,44 @@ class VictronVrm extends utils.Adapter {
         };
 
         if (existing) {
-            await this.extendObjectAsync(path, objDef);
+            try {
+                await this.extendObjectAsync(path, objDef);
+            } catch (err) {
+                this.log.error(`Konnte Objekt nicht erweitern (${path}): ${err.message} - objDef: ${JSON.stringify(objDef)}`);
+                return;
+            }
         } else {
-            await this.setObjectNotExistsAsync(path, objDef);
+            try {
+                await this.setObjectNotExistsAsync(path, objDef);
+            } catch (err) {
+                this.log.error(`Konnte Objekt nicht anlegen (${path}): ${err.message} - objDef: ${JSON.stringify(objDef)}`);
+                return;
+            }
         }
 
         this.knownObjects.add(path);
     }
 
     // Erkennt zustandsartige numerische Felder wie Charge_state/MPPT_State: kein Unit,
-    // aber VRM liefert in item.value einen lesbaren Text zum Rohwert.
+    // aber VRM liefert in item.formattedValue einen lesbaren Text zum Rohwert.
     looksLikeEnum(unit, val, item) {
         return (
             !unit &&
             typeof val === 'number' &&
-            typeof item.value === 'string' &&
-            item.value.trim() !== '' &&
-            item.value.trim() !== String(val)
+            typeof item.formattedValue === 'string' &&
+            item.formattedValue.trim() !== '' &&
+            item.formattedValue.trim() !== String(val)
         );
     }
 
     async maybeUpdateEnumState(path, val, item) {
-        if (typeof item.value !== 'string') {
+        if (typeof item.formattedValue !== 'string') {
             return;
         }
         const key = String(val);
         const states = this.enumStates[path];
         if (states[key] === undefined) {
-            states[key] = item.value.trim();
+            states[key] = item.formattedValue.trim();
             await this.extendObjectAsync(path, { common: { states } });
         }
     }

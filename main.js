@@ -73,6 +73,17 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
+     * Bereinigt Unit-Strings von Format-Platzhaltern (%.2F, %d, etc.)
+     */
+    cleanUnit(formatWithUnit) {
+        if (!formatWithUnit) return "";
+        return formatWithUnit
+            .replace(/%[^s]/g, "")  // Entfernt alle %X außer %s
+            .replace("%s", "")      // Entfernt %s
+            .trim();
+    }
+
+    /**
      * Holt die Standard-Diagnosedaten
      */
     async fetchDiagnosticsData() {
@@ -169,10 +180,7 @@ class VictronVrm extends utils.Adapter {
                 const name = record.description || record.code;
                 const value = record.formattedValue;
                 
-                let unit = "";
-                if (record.formatWithUnit) {
-                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
-                }
+                const unit = this.cleanUnit(record.formatWithUnit);
                 
                 await this.extendObjectAsync(dpId, {
                     type: "state",
@@ -219,10 +227,7 @@ class VictronVrm extends utils.Adapter {
                 const name = record.description || record.code;
                 const value = record.formattedValue;
                 
-                let unit = "";
-                if (record.formatWithUnit) {
-                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
-                }
+                const unit = this.cleanUnit(record.formatWithUnit);
                 
                 await this.extendObjectAsync(dpId, {
                     type: "state",
@@ -281,10 +286,7 @@ class VictronVrm extends utils.Adapter {
                 const name = record.description || record.code;
                 const value = record.formattedValue;
                 
-                let unit = "";
-                if (record.formatWithUnit) {
-                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
-                }
+                const unit = this.cleanUnit(record.formatWithUnit);
                 
                 await this.extendObjectAsync(dpId, {
                     type: "state",
@@ -330,10 +332,7 @@ class VictronVrm extends utils.Adapter {
                 const name = record.description || record.code;
                 const value = record.formattedValue;
                 
-                let unit = "";
-                if (record.formatWithUnit) {
-                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
-                }
+                const unit = this.cleanUnit(record.formatWithUnit);
                 
                 await this.extendObjectAsync(dpId, {
                     type: "state",

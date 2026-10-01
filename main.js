@@ -73,14 +73,14 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Bereinigt Unit-Strings von Format-Platzhaltern (%.2F, %d, etc.)
+     * Bereinigt Unit-Strings: extrahiert nur den Teil nach dem letzten Leerzeichen
+     * z.B. "%.1F Ah" → "Ah", "%d W" → "W", "%s" → ""
      */
     cleanUnit(formatWithUnit) {
         if (!formatWithUnit) return "";
-        return formatWithUnit
-            .replace(/%[^s]/g, "")  // Entfernt alle %X außer %s
-            .replace("%s", "")      // Entfernt %s
-            .trim();
+        const lastSpace = formatWithUnit.lastIndexOf(' ');
+        if (lastSpace === -1) return ""; // Kein Leerzeichen = keine Unit
+        return formatWithUnit.substring(lastSpace + 1).trim();
     }
 
     /**
@@ -563,6 +563,7 @@ class VictronVrm extends utils.Adapter {
             case "W": return "value.power";
             case "Wh":
             case "kWh": return "value.energy";
+            case "Ah": return "value.battery";
             case "%": return "value.battery";
             case "°C": return "value.temperature";
             default: return "state";

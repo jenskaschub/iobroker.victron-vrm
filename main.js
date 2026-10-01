@@ -49,7 +49,7 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Holt die Standard-Diagnosedaten
+     * Holt die Standard-Diagnosedaten und organisiert sie nach Gerätetyp
      */
     async fetchDiagnosticsData() {
         try {
@@ -62,38 +62,72 @@ class VictronVrm extends utils.Adapter {
             });
 
             this.log.debug(`Diagnostics API Response Status: ${response.status}`);
-            this.log.debug(`Diagnostics API Response Data: ${JSON.stringify(response.data)}`);
 
             if (response.data && response.data.success && response.data.records) {
                 this.setState("info.connection", true, true);
                 this.log.info(`Received ${response.data.records.length} diagnostic records`);
                 
+                // Gruppiere Records nach Device-Typ
+                const groupedByDevice = {};
                 for (const record of response.data.records) {
                     if (!record.idDataAttribute) continue;
                     
-                    const dpId = `diagnostics.${record.idDataAttribute}`;
-                    const name = record.description || record.code;
-                    const value = record.formattedValue; 
+                    const device = record.Device || "Unknown";
+                    const instance = record.instance || 0;
+                    const deviceKey = `${device}_${instance}`;
                     
-                    let unit = "";
-                    if (record.formatWithUnit) {
-                        unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                    if (!groupedByDevice[deviceKey]) {
+                        groupedByDevice[deviceKey] = [];
                     }
-
-                    await this.extendObjectAsync(dpId, {
-                        type: "state",
+                    groupedByDevice[deviceKey].push(record);
+                }
+                
+                // Verarbeite jede Device-Gruppe
+                for (const deviceKey in groupedByDevice) {
+                    const records = groupedByDevice[deviceKey];
+                    const [device, instance] = deviceKey.split("_");
+                    
+                    // Erstelle Device-Kanal
+                    const deviceId = `${device}${instance}`;
+                    await this.extendObjectAsync(deviceId, {
+                        type: "channel",
                         common: {
-                            name: name,
-                            type: typeof value === "number" ? "number" : "string",
-                            role: this.determineRole(unit),
-                            unit: unit,
-                            read: true,
-                            write: false
+                            name: `${device} (Instance ${instance})`
                         },
                         native: {}
                     });
                     
-                    await this.setStateAsync(dpId, value, true);
+                    // Verarbeite jeden Record in dieser Device-Gruppe
+                    for (const record of records) {
+                        const name = record.description || record.code;
+                        const value = record.formattedValue;
+                        
+                        let unit = "";
+                        if (record.formatWithUnit) {
+                            unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                        }
+                        
+                        // Sanitize Attribut-Namen für ioBroker
+                        const attrName = this.sanitizeId(name || `attr_${record.idDataAttribute}`);
+                        const dpId = `${deviceId}.${attrName}`;
+                        
+                        await this.extendObjectAsync(dpId, {
+                            type: "state",
+                            common: {
+                                name: name,
+                                type: typeof value === "number" ? "number" : "string",
+                                role: this.determineRole(unit),
+                                unit: unit,
+                                read: true,
+                                write: false
+                            },
+                            native: {
+                                idDataAttribute: record.idDataAttribute
+                            }
+                        });
+                        
+                        await this.setStateAsync(dpId, value, true);
+                    }
                 }
             } else {
                 this.log.warn(`Diagnostics response does not have expected structure. Success: ${response.data?.success}, Has records: ${!!response.data?.records}`);
@@ -119,43 +153,58 @@ class VictronVrm extends utils.Adapter {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
+            // Erstelle Forecast-Kanal
+            await this.extendObjectAsync("forecast", {
+                type: "channel",
+                common: {
+                    name: "Forecast Data"
+                },
+                native: {}
+            });
+            
             const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
 
             // 1. PV-Prognose (solar_forecast)
             const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
             this.log.debug(`Fetching solar forecast from: ${urlSolar}`);
             
-            const resSolar = await axios.get(urlSolar, {
-                headers: { "X-Authorization": `Token ${this.config.token}` }
-            });
-            
-            this.log.debug(`Solar Forecast Response: ${JSON.stringify(resSolar.data)}`);
-            
-            if (resSolar.data && resSolar.data.success && resSolar.data.records) {
-                await this.processForecastRecords(resSolar.data.records, "forecast.solar");
+            try {
+                const resSolar = await axios.get(urlSolar, {
+                    headers: { "X-Authorization": `Token ${this.config.token}` }
+                });
+                
+                this.log.debug(`Solar Forecast Response: ${JSON.stringify(resSolar.data)}`);
+                
+                if (resSolar.data && resSolar.data.success && resSolar.data.records) {
+                    await this.processForecastRecords(resSolar.data.records, "forecast.solar");
+                    this.log.info("Solar forecast data processed successfully");
+                }
+            } catch (error) {
+                this.log.warn(`Solar forecast fetch error: ${error.message}`);
             }
 
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
             const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
             this.log.debug(`Fetching consumption forecast from: ${urlCons}`);
             
-            const resCons = await axios.get(urlCons, {
-                headers: { "X-Authorization": `Token ${this.config.token}` }
-            });
-            
-            this.log.debug(`Consumption Forecast Response: ${JSON.stringify(resCons.data)}`);
-            
-            if (resCons.data && resCons.data.success && resCons.data.records) {
-                await this.processForecastRecords(resCons.data.records, "forecast.consumption");
+            try {
+                const resCons = await axios.get(urlCons, {
+                    headers: { "X-Authorization": `Token ${this.config.token}` }
+                });
+                
+                this.log.debug(`Consumption Forecast Response: ${JSON.stringify(resCons.data)}`);
+                
+                if (resCons.data && resCons.data.success && resCons.data.records) {
+                    await this.processForecastRecords(resCons.data.records, "forecast.consumption");
+                    this.log.info("Consumption forecast data processed successfully");
+                }
+            } catch (error) {
+                this.log.warn(`Consumption forecast fetch error: ${error.message}`);
             }
 
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Forecast-Daten: ${error.message}`);
             this.log.debug(`Full error: ${JSON.stringify(error)}`);
-            if (error.response) {
-                this.log.error(`HTTP Status: ${error.response.status}`);
-                this.log.error(`HTTP Response: ${JSON.stringify(error.response.data)}`);
-            }
         }
     }
 
@@ -185,6 +234,16 @@ class VictronVrm extends utils.Adapter {
 
         if (entries.length === 0) return;
 
+        // Erstelle Forecast-Typ-Kanal
+        const forecastType = baseChannel.split(".")[1];
+        await this.extendObjectAsync(baseChannel, {
+            type: "channel",
+            common: {
+                name: `${forecastType.charAt(0).toUpperCase() + forecastType.slice(1)} Forecast`
+            },
+            native: {}
+        });
+
         // Speichere die kompletten Rohdaten als JSON-String
         const jsonDpId = `${baseChannel}.raw_json`;
         await this.extendObjectAsync(jsonDpId, {
@@ -205,13 +264,24 @@ class VictronVrm extends utils.Adapter {
             const entry = entries[i];
             const dateStr = new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             
-            const dpValueId = `${baseChannel}.plus_${i}_hour.value`;
-            const dpTimeId = `${baseChannel}.plus_${i}_hour.time`;
+            const hourChannelId = `${baseChannel}.plus_${i}_hour`;
+            
+            // Erstelle Stunden-Kanal
+            await this.extendObjectAsync(hourChannelId, {
+                type: "channel",
+                common: {
+                    name: `In ${i} Stunden (${dateStr})`
+                },
+                native: {}
+            });
+            
+            const dpValueId = `${hourChannelId}.value`;
+            const dpTimeId = `${hourChannelId}.time`;
 
             await this.extendObjectAsync(dpValueId, {
                 type: "state",
                 common: {
-                    name: `In ${i} Stunden (${dateStr})`,
+                    name: `Value`,
                     type: "number",
                     role: "value.power",
                     unit: "Wh",
@@ -225,7 +295,7 @@ class VictronVrm extends utils.Adapter {
             await this.extendObjectAsync(dpTimeId, {
                 type: "state",
                 common: {
-                    name: `Uhrzeit für Segment +${i}`,
+                    name: `Time`,
                     type: "string",
                     role: "date",
                     read: true,
@@ -235,6 +305,18 @@ class VictronVrm extends utils.Adapter {
             });
             await this.setStateAsync(dpTimeId, dateStr, true);
         }
+    }
+
+    /**
+     * Sanitize String für ioBroker Objekt-IDs
+     */
+    sanitizeId(str) {
+        return str
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "_")
+            .replace(/_+/g, "_")
+            .replace(/^_|_$/g, "")
+            .substring(0, 60);
     }
 
     /**

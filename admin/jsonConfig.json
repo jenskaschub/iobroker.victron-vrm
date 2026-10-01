@@ -1,34 +1,29 @@
 {
-  "type": "panel",
-  "items": {
-    "vrmToken": {
-      "type": "password",
-      "label": "VRM Access Token",
-      "help": "Personal Access Token aus VRM: Preferences -> Integrations -> Access tokens",
-      "newLine": true,
-      "xs": 12,
-      "sm": 6,
-      "md": 4
-    },
-    "installationId": {
-      "type": "text",
-      "label": "Installations-ID (idSite)",
-      "help": "Zu finden in der VRM-URL: vrm.victronenergy.com/installation/<idSite>/dashboard",
-      "newLine": true,
-      "xs": 12,
-      "sm": 6,
-      "md": 4
-    },
-    "pollInterval": {
-      "type": "number",
-      "label": "Abfrageintervall",
-      "help": "in Sekunden",
-      "min": 5,
-      "default": 60,
-      "newLine": true,
-      "xs": 12,
-      "sm": 6,
-      "md": 4
+    "i18n": true,
+    "type": "panel",
+    "items": {
+        "idSite": {
+            "type": "text",
+            "label": "VRM Installations-ID (idSite)",
+            "sm": 12,
+            "md": 6,
+            "help": "Zu finden in der VRM-URL: ://victronenergy.com<idSite>/dashboard"
+        },
+        "token": {
+            "type": "text",
+            "label": "VRM Access Token",
+            "sm": 12,
+            "md": 6,
+            "help": "Erstellen im VRM-Portal unter Preferences -> Integrations -> Access tokens"
+        },
+        "interval": {
+            "type": "number",
+            "label": "Abfrageintervall Diagnosedaten (Sekunden)",
+            "sm": 6,
+            "md": 4,
+            "min": 10,
+            "max": 3600,
+            "default": 30
+        }
     }
-  }
 }

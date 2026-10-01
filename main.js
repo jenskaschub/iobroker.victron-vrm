@@ -55,12 +55,19 @@ class VictronVrm extends utils.Adapter {
         try {
             const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
             const url = `${baseUrl}/diagnostics`;
+            
+            this.log.debug(`Fetching diagnostics from: ${url}`);
+            
             const response = await axios.get(url, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
 
+            this.log.debug(`Diagnostics API Response Status: ${response.status}`);
+            this.log.debug(`Diagnostics API Response Data: ${JSON.stringify(response.data)}`);
+
             if (response.data && response.data.success && response.data.records) {
                 this.setState("info.connection", true, true);
+                this.log.info(`Received ${response.data.records.length} diagnostic records`);
                 
                 for (const record of response.data.records) {
                     if (!record.idAttribute) continue;
@@ -89,9 +96,19 @@ class VictronVrm extends utils.Adapter {
                     
                     await this.setStateAsync(dpId, value, true);
                 }
+            } else {
+                this.log.warn(`Diagnostics response does not have expected structure. Success: ${response.data?.success}, Has records: ${!!response.data?.records}`);
+                if (!response.data?.success) {
+                    this.setState("info.connection", false, true);
+                }
             }
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);
+            this.log.debug(`Full error: ${JSON.stringify(error)}`);
+            if (error.response) {
+                this.log.error(`HTTP Status: ${error.response.status}`);
+                this.log.error(`HTTP Response: ${JSON.stringify(error.response.data)}`);
+            }
             this.setState("info.connection", false, true);
         }
     }
@@ -107,24 +124,39 @@ class VictronVrm extends utils.Adapter {
 
             // 1. PV-Prognose (solar_forecast)
             const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
+            this.log.debug(`Fetching solar forecast from: ${urlSolar}`);
+            
             const resSolar = await axios.get(urlSolar, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
+            
+            this.log.debug(`Solar Forecast Response: ${JSON.stringify(resSolar.data)}`);
+            
             if (resSolar.data && resSolar.data.success && resSolar.data.records) {
                 await this.processForecastRecords(resSolar.data.records, "forecast.solar");
             }
 
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
             const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
+            this.log.debug(`Fetching consumption forecast from: ${urlCons}`);
+            
             const resCons = await axios.get(urlCons, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
+            
+            this.log.debug(`Consumption Forecast Response: ${JSON.stringify(resCons.data)}`);
+            
             if (resCons.data && resCons.data.success && resCons.data.records) {
                 await this.processForecastRecords(resCons.data.records, "forecast.consumption");
             }
 
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Forecast-Daten: ${error.message}`);
+            this.log.debug(`Full error: ${JSON.stringify(error)}`);
+            if (error.response) {
+                this.log.error(`HTTP Status: ${error.response.status}`);
+                this.log.error(`HTTP Response: ${JSON.stringify(error.response.data)}`);
+            }
         }
     }
 

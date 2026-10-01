@@ -53,13 +53,12 @@ class VictronVrm extends utils.Adapter {
      */
     async fetchDiagnosticsData() {
         try {
-            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
-            const url = `${baseUrl}/diagnostics`;
+            const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}/diagnostics`;
             
             this.log.debug(`Fetching diagnostics from: ${url}`);
             
             const response = await axios.get(url, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: { "X-Authorization": `Token ${this.config.token}` }
             });
 
             this.log.debug(`Diagnostics API Response Status: ${response.status}`);
@@ -70,15 +69,15 @@ class VictronVrm extends utils.Adapter {
                 this.log.info(`Received ${response.data.records.length} diagnostic records`);
                 
                 for (const record of response.data.records) {
-                    if (!record.idAttribute) continue;
+                    if (!record.idDataAttribute) continue;
                     
-                    const dpId = `diagnostics.${record.idAttribute}`;
+                    const dpId = `diagnostics.${record.idDataAttribute}`;
                     const name = record.description || record.code;
                     const value = record.formattedValue; 
                     
                     let unit = "";
                     if (record.formatWithUnit) {
-                        unit = record.formatWithUnit.replace("%val", "").trim();
+                        unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
                     }
 
                     await this.extendObjectAsync(dpId, {
@@ -120,14 +119,14 @@ class VictronVrm extends utils.Adapter {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
-            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
+            const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
 
             // 1. PV-Prognose (solar_forecast)
             const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
             this.log.debug(`Fetching solar forecast from: ${urlSolar}`);
             
             const resSolar = await axios.get(urlSolar, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: { "X-Authorization": `Token ${this.config.token}` }
             });
             
             this.log.debug(`Solar Forecast Response: ${JSON.stringify(resSolar.data)}`);
@@ -141,7 +140,7 @@ class VictronVrm extends utils.Adapter {
             this.log.debug(`Fetching consumption forecast from: ${urlCons}`);
             
             const resCons = await axios.get(urlCons, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: { "X-Authorization": `Token ${this.config.token}` }
             });
             
             this.log.debug(`Consumption Forecast Response: ${JSON.stringify(resCons.data)}`);

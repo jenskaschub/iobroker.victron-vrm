@@ -22,39 +22,34 @@ class VictronVrm extends utils.Adapter {
     /**
      * Is called when databases are connected and adapter received configuration.
      */
-        async onReady() {
-        // DEBUG-ZEILE: Zeigt im Log an, was wirklich ankommt (Token wird maskiert)
-        this.log.info(`DEBUG-CONFIG: idSite="${this.config.idSite}", Token-Länge=${this.config.token ? this.config.token.length : 0}, Intervall=${this.config.interval}`);
-
-        // Überprüfen, ob die Konfiguration vorhanden ist
+    async onReady() {
+        // Validierung der Konfigurationswerte
         if (!this.config.token || !this.config.idSite) {
             this.log.error("VRM Access Token oder Installations-ID (idSite) fehlt in der Konfiguration!");
             this.setState("info.connection", false, true);
             return;
         }
-        // ... restlicher Code
-
 
         this.log.info(`Starte Victron VRM Adapter für Instanz ${this.config.idSite}`);
         
-        // Erstmaliger Abruf beim Start
+        // Erstmaliger Datenabruf beim Start
         await this.fetchDiagnosticsData();
         await this.fetchForecastData();
 
-        // Intervall für Live-Diagnosedaten (z. B. alle 30-60 Sekunden aus Config)
+        // Intervall für Live-Diagnosedaten aus Config (Standard: 30s)
         const intervalSec = parseInt(this.config.interval, 10) || 30;
         this.updateInterval = this.setInterval(async () => {
             await this.fetchDiagnosticsData();
         }, intervalSec * 1000);
 
-        // Prognosedaten ändern sich selten. Ein Abruf alle 30 Minuten schont die API-Limits.
+        // Prognosedaten ändern sich selten -> Abruf alle 30 Minuten
         this.forecastInterval = this.setInterval(async () => {
             await this.fetchForecastData();
         }, 30 * 60 * 1000);
     }
 
     /**
-     * Holt die Standard-Diagnosedaten (Bisherige Logik)
+     * Holt die Standard-Diagnosedaten
      */
     async fetchDiagnosticsData() {
         try {
@@ -66,7 +61,6 @@ class VictronVrm extends utils.Adapter {
             if (response.data && response.data.success && response.data.records) {
                 this.setState("info.connection", true, true);
                 
-                // Verarbeite Records und erstelle Datenpunkte analog zu deinem bisherigen Parser
                 for (const record of response.data.records) {
                     if (!record.idAttribute) continue;
                     
@@ -74,7 +68,6 @@ class VictronVrm extends utils.Adapter {
                     const name = record.description || record.code;
                     const value = record.formattedValue; 
                     
-                    // Extrahiere Einheit, falls vorhanden (z.B. "V", "A", "W", "%")
                     let unit = "";
                     if (record.formatWithUnit) {
                         unit = record.formatWithUnit.replace("%val", "").trim();
@@ -103,34 +96,28 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Holt die PV-Prognose und den Verbrauchs-Forecast (Erweiterung)
+     * Holt die PV-Prognose und den Verbrauchs-Forecast
      */
     async fetchForecastData() {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
-            // Abruf für PV-Prognose (solar_forecast)
-            // Intervall 'hours' liefert stündliche Auflösung für heute/morgen
-            const urlForecast = `https://victronenergy.com{this.config.idSite}/stats?type=solar_forecast&interval=hours`;
-            
-            const response = await axios.get(urlForecast, {
+            // 1. PV-Prognose (solar_forecast)
+            const urlSolar = `https://victronenergy.com{this.config.idSite}/stats?type=solar_forecast&interval=hours`;
+            const resSolar = await axios.get(urlSolar, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
-
-            if (response.data && response.data.success && response.data.records) {
-                // Datenpunkte für PV-Prognose verarbeiten
-                await this.processForecastRecords(response.data.records, "forecast.solar");
+            if (resSolar.data && resSolar.data.success && resSolar.data.records) {
+                await this.processForecastRecords(resSolar.data.records, "forecast.solar");
             }
 
-            // Abruf für Verbrauchs-Prognose (vrm_consumption_fc)
-            const urlConsumption = `https://victronenergy.com{this.config.idSite}/stats?type=vrm_consumption_fc&interval=hours`;
-            const responseCons = await axios.get(urlConsumption, {
+            // 2. Verbrauchs-Prognose (vrm_consumption_fc)
+            const urlCons = `https://victronenergy.com{this.config.idSite}/stats?type=vrm_consumption_fc&interval=hours`;
+            const resCons = await axios.get(urlCons, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
-
-            if (responseCons.data && responseCons.data.success && responseCons.data.records) {
-                // Datenpunkte für Verbrauchs-Prognose verarbeiten
-                await this.processForecastRecords(responseCons.data.records, "forecast.consumption");
+            if (resCons.data && resCons.data.success && resCons.data.records) {
+                await this.processForecastRecords(resCons.data.records, "forecast.consumption");
             }
 
         } catch (error) {
@@ -139,25 +126,32 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Hilfsfunktion um die JSON-Arrays der Forecasts in ioBroker-Strukturen zu gießen
+     * Hilfsfunktion: Verarbeitet die verschachtelten Victron-Arrays
      */
     async processForecastRecords(records, baseChannel) {
-        // Falls Victron ein Objekt mit Timestamps zurückgibt (z.B. { "1711972800": 450, ... })
-        // oder ein Array aus Objekten [ { timestamp: 1711972800, value: 450 } ]
+        let rawEntries = [];
         
-        let entries = [];
-        if (Array.isArray(records)) {
-            entries = records;
-        } else if (typeof records === "object") {
-            entries = Object.entries(records).map(([ts, val]) => ({ timestamp: parseInt(ts, 10), value: val }));
+        // Victron liefert im Stats-Endpunkt ein Objekt zurück, dessen Key dynamisch dem Typ entspricht
+        const keys = Object.keys(records);
+        if (keys.length > 0 && Array.isArray(records[keys[0]])) {
+            rawEntries = records[keys[0]];
+        } else if (Array.isArray(records)) {
+            rawEntries = records;
         }
+
+        if (rawEntries.length === 0) return;
+
+        // Iteriert durch das [Timestamp, Value] Format der API
+        const entries = rawEntries.map(item => {
+            if (Array.isArray(item) && item.length >= 2) {
+                return { timestamp: Math.round(item[0] / 1000), value: item[1] };
+            }
+            return null;
+        }).filter(item => item !== null).sort((a, b) => a.timestamp - b.timestamp);
 
         if (entries.length === 0) return;
 
-        // Sortieren nach Zeitstempel aufsteigend
-        entries.sort((a, b) => a.timestamp - b.timestamp);
-
-        // 1. Rohdaten als JSON-String wegspeichern (für Scripte oder Lovelace/Grafana-Charts)
+        // Speichere die kompletten Rohdaten als JSON-String
         const jsonDpId = `${baseChannel}.raw_json`;
         await this.extendObjectAsync(jsonDpId, {
             type: "state",
@@ -172,16 +166,14 @@ class VictronVrm extends utils.Adapter {
         });
         await this.setStateAsync(jsonDpId, JSON.stringify(entries), true);
 
-        // 2. Sinnvolle, feste Datenpunkte extrahieren (Nächste Stunden extrahieren)
-        // Wir legen feste Datenpunkte für die "nächsten X Stunden" an
+        // Schreibt die nächsten 12 stündlichen Segmente in Einzeldatenpunkte
         for (let i = 0; i < Math.min(entries.length, 12); i++) {
             const entry = entries[i];
-            const dateStr = new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const dateStr = new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             
             const dpValueId = `${baseChannel}.plus_${i}_hour.value`;
             const dpTimeId = `${baseChannel}.plus_${i}_hour.time`;
 
-            // Wert-Datenpunkt (Watt oder Wattstunden je nachdem was die API liefert, meist Wh für das Intervall)
             await this.extendObjectAsync(dpValueId, {
                 type: "state",
                 common: {
@@ -196,7 +188,6 @@ class VictronVrm extends utils.Adapter {
             });
             await this.setStateAsync(dpValueId, entry.value, true);
 
-            // Uhrzeit-Datenpunkt dazu
             await this.extendObjectAsync(dpTimeId, {
                 type: "state",
                 common: {
@@ -213,7 +204,7 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Hilfsfunktion zur Zuweisung von ioBroker-Rollen basierend auf der Einheit
+     * Hilfsfunktion zur automatischen Rollen-Zuweisung
      */
     determineRole(unit) {
         switch (unit) {
@@ -243,11 +234,7 @@ class VictronVrm extends utils.Adapter {
 }
 
 if (require.main !== module) {
-    /**
-     * @param {Partial<utils.AdapterOptions>} [options={}]
-     */
     module.exports = (options) => new VictronVrm(options);
 } else {
-    // otherwise start the instance directly
     new VictronVrm();
 }

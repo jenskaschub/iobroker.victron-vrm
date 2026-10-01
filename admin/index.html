@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <meta name="theme-color" content="#1976D2"/>
+    <base href="."/>
+    <title>Victron VRM Adapter</title>
+    <link rel="stylesheet" type="text/css" href="../../css/adapter.css"/>
+    <link rel="stylesheet" type="text/css" href="../../lib/css/materialize.css"/>
+    <script type="text/javascript" src="../../lib/js/jquery-3.2.1.min.js"></script>
+    <script type="text/javascript" src="../../socket.io/socket.io.js"></script>
+    <script type="text/javascript" src="../../js/translate.js"></script>
+    <script type="text/javascript" src="../../lib/js/materialize.js"></script>
+    <script type="text/javascript" src="../../js/adapter-settings.js"></script>
+    <style>
+        .param {
+            padding: 10px;
+        }
+        .param-name {
+            font-weight: bold;
+            display: inline-block;
+            min-width: 200px;
+        }
+        input, select, textarea {
+            width: 100%;
+        }
+    </style>
+    <script type="text/javascript">
+        // Translations
+        if (!window.adapterSettings) {
+            window.adapterSettings = {};
+        }
+        
+        // Save settings
+        function save(callback) {
+            // example: select elements with class="value" and save them to settings
+            var obj = {};
+            $('.value').each(function () {
+                var $this = $(this);
+                if ($this.attr('type') === 'checkbox') {
+                    obj[$this.attr('id')] = $this.prop('checked');
+                } else if ($this.attr('type') === 'number') {
+                    obj[$this.attr('id')] = parseInt($this.val());
+                } else {
+                    obj[$this.attr('id')] = $this.val();
+                }
+            });
+            callback(obj);
+        }
+
+        // Load settings
+        function load(settings, onChange) {
+            // example: fill select elements with settings values
+            for (var key in settings) {
+                var $elm = $('#' + key);
+                if ($elm.attr('type') === 'checkbox') {
+                    $elm.prop('checked', settings[key]).change(function () {
+                        onChange();
+                    });
+                } else if ($elm.attr('type') === 'number') {
+                    $elm.val(parseInt(settings[key])).change(function () {
+                        onChange();
+                    });
+                } else {
+                    $elm.val(settings[key]).change(function () {
+                        onChange();
+                    });
+                }
+            }
+            onChange(false);
+        }
+    </script>
+</head>
+<body>
+    <div class="adapter-container">
+        <div class="page-header">
+            <h1><img src="icon.png" class="logo"/> Victron VRM Adapter Settings</h1>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <tbody>
+                    <tr>
+                        <td class="param-name">VRM Access Token:</td>
+                        <td>
+                            <input class="value" id="token" type="text" placeholder="Paste your VRM API token here"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="param-name">Installation ID (idSite):</td>
+                        <td>
+                            <input class="value" id="idSite" type="text" placeholder="Your Victron installation ID"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="param-name">Update Interval (seconds):</td>
+                        <td>
+                            <input class="value" id="interval" type="number" min="10" max="3600" value="30"/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <p style="font-size: 0.9em; color: #666; margin-top: 15px;">
+                                <strong>Note:</strong> Get your VRM API token from <a href="https://vrm.victronenergy.com/app" target="_blank">https://vrm.victronenergy.com/app</a><br>
+                                Find your Installation ID in your VRM dashboard.
+                            </p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

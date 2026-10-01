@@ -17,8 +17,8 @@
       "de": "Victron VRM API Datenimport"
     },
     "desc": {
-      "en": "Imports diagnostics, solar production forecasts, and consumption forecasts from the Victron VRM Portal without requiring local LAN access.",
-      "de": "Importiert Diagnosedaten, Solarertragsprognosen und Verbrauchsprognosen aus dem Victron VRM-Portal, ohne lokalen LAN-Zugriff zu benötigen."
+      "en": "Imports diagnostics, solar production forecasts, and consumption forecasts from the Victron VRM Portal.",
+      "de": "Importiert Diagnosedaten, Solarertragsprognosen und Verbrauchsprognosen aus dem Victron VRM-Portal."
     },
     "authors": [
       "jenskaschub <jens@kaschub.de>"
@@ -47,8 +47,6 @@
     "type": "energy",
     "tier": 3,
     "compact": true,
-    "connectionType": "cloud",
-    "dataSource": "poll",
     "connectionType": "cloud",
     "dataSource": "poll",
     "adminUI": {

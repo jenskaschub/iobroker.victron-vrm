@@ -53,7 +53,9 @@ class VictronVrm extends utils.Adapter {
      */
     getHeaders() {
         return {
-            "X-Authorization": `Token ${this.config.token}`
+            "X-Authorization": `Token ${this.config.token}`,
+            "Accept": "application/json",
+            "User-Agent": "ioBroker.victron-vrm/0.1.0"
         };
     }
 
@@ -72,92 +74,12 @@ class VictronVrm extends utils.Adapter {
             if (response.data && response.data.success && Array.isArray(response.data.records)) {
                 this.setState("info.connection", true, true);
                 
-                for (const record of response.data.records) {
-                    if (!record.idDataAttribute) continue;
-                    
-                    const dpId = `diagnostics.${record.idDataAttribute}`;
-                    const name = record.description || record.code;
-                    const value = record.formattedValue; 
-                    
-                    let unit = "";
-                    if (record.formatWithUnit) {
-                        unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
-                    }
-
-                    await this.extendObjectAsync(dpId, {
-                        type: "state",
-                        common: {
-                            name: name,
-                            type: typeof value === "number" ? "number" : "string",
-                            role: this.determineRole(unit),
-                            unit: unit,
-                            read: true,
-                            write: false
-                        },
-                        native: {}
-                    });
-                    
-                    await this.setStateAsync(dpId, value, true);
-
-                    // Tank custom name extraction
-                    if (record.code && /^tank/i.test(record.code) || (record.description && /Tank\s*\d+/i.test(record.description))) {
-                        const match = (record.code || "").match(/tank(\d+)/i) || (record.description || "").match(/Tank\s*(\d+)/i);
-                        if (match) {
-                            const tankNumber = match[1];
-                            const tankChannelId = `Tank${tankNumber}`;
-                            const tankDpId = `${tankChannelId}.tank_custom_name`;
-
-                            await this.extendObjectAsync(tankChannelId, {
-                                type: "channel",
-                                common: { name: "Tank" },
-                                native: {}
-                            });
-
-                            await this.extendObjectAsync(tankDpId, {
-                                type: "state",
-                                common: {
-                                    name: "Tank Custom Name",
-                                    type: "string",
-                                    role: "info.name",
-                                    read: true,
-                                    write: false
-                                },
-                                native: {}
-                            });
-
-                            await this.setStateAsync(tankDpId, record.description || record.code || `Tank ${tankNumber}`, true);
-                        }
-                    }
-
-                    // Temperature sensor custom name extraction
-                    if (record.description && /Temperature.*Sensor\s*\d+/i.test(record.description)) {
-                        const match = record.description.match(/Sensor\s*(\d+)/i);
-                        if (match) {
-                            const sensorNumber = match[1];
-                            const sensorChannelId = `Temperature sensor${sensorNumber}`;
-                            const sensorDpId = `${sensorChannelId}.temperature_custom_name`;
-
-                            await this.extendObjectAsync(sensorChannelId, {
-                                type: "channel",
-                                common: { name: "Temperature Sensor" },
-                                native: {}
-                            });
-
-                            await this.extendObjectAsync(sensorDpId, {
-                                type: "state",
-                                common: {
-                                    name: "Temperature Sensor Custom Name",
-                                    type: "string",
-                                    role: "info.name",
-                                    read: true,
-                                    write: false
-                                },
-                                native: {}
-                            });
-
-                            await this.setStateAsync(sensorDpId, record.description || record.code || `Temperature Sensor ${sensorNumber}`, true);
-                        }
-                    }
+                // Gruppiere Records nach Device und Instance
+                const groupedRecords = this.groupRecordsByDevice(response.data.records);
+                
+                // Verarbeite jedes Device
+                for (const [deviceType, instances] of Object.entries(groupedRecords)) {
+                    await this.processDeviceType(deviceType, instances);
                 }
             } else {
                 this.log.warn(`Unerwartete API-Antwortstruktur bei diagnostics.`);
@@ -167,6 +89,201 @@ class VictronVrm extends utils.Adapter {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);
             this.setState("info.connection", false, true);
         }
+    }
+
+    /**
+     * Gruppiert Records nach Device-Typ und Instance
+     */
+    groupRecordsByDevice(records) {
+        const grouped = {};
+        
+        for (const record of records) {
+            const deviceType = record.Device || "Unknown";
+            const instance = record.instance || 0;
+            
+            if (!grouped[deviceType]) {
+                grouped[deviceType] = {};
+            }
+            if (!grouped[deviceType][instance]) {
+                grouped[deviceType][instance] = [];
+            }
+            
+            grouped[deviceType][instance].push(record);
+        }
+        
+        return grouped;
+    }
+
+    /**
+     * Verarbeitet einen Device-Typ (z.B. Tank, Temperature sensor, Battery Monitor, etc.)
+     */
+    async processDeviceType(deviceType, instances) {
+        if (deviceType === "Tank") {
+            await this.processTanks(instances);
+        } else if (deviceType === "Temperature sensor") {
+            await this.processTemperatureSensors(instances);
+        } else {
+            await this.processGenericDevice(deviceType, instances);
+        }
+    }
+
+    /**
+     * Verarbeitet Tank-Daten
+     */
+    async processTanks(instances) {
+        for (const [instanceKey, records] of Object.entries(instances)) {
+            // Finde den custom name (code: "tcn")
+            const customNameRecord = records.find(r => r.code === "tcn");
+            const customName = customNameRecord ? customNameRecord.description : `Tank ${instanceKey}`;
+            
+            // Erstelle Channel für diesen Tank mit seinem custom name
+            const channelId = `Tank.${this.sanitizeName(customName)}`;
+            
+            await this.extendObjectAsync(channelId, {
+                type: "channel",
+                common: { name: customName },
+                native: {}
+            });
+            
+            // Verarbeite alle Records dieses Tanks
+            for (const record of records) {
+                if (!record.idDataAttribute) continue;
+                
+                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const name = record.description || record.code;
+                const value = record.formattedValue;
+                
+                let unit = "";
+                if (record.formatWithUnit) {
+                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                }
+                
+                await this.extendObjectAsync(dpId, {
+                    type: "state",
+                    common: {
+                        name: name,
+                        type: typeof value === "number" ? "number" : "string",
+                        role: this.determineRole(unit),
+                        unit: unit,
+                        read: true,
+                        write: false
+                    },
+                    native: {}
+                });
+                
+                await this.setStateAsync(dpId, value, true);
+            }
+        }
+    }
+
+    /**
+     * Verarbeitet Temperature Sensor-Daten
+     */
+    async processTemperatureSensors(instances) {
+        for (const [instanceKey, records] of Object.entries(instances)) {
+            // Finde den custom name (code: "tscn")
+            const customNameRecord = records.find(r => r.code === "tscn");
+            const customName = customNameRecord ? customNameRecord.description : `Temperature sensor ${instanceKey}`;
+            
+            // Erstelle Channel für diesen Sensor mit seinem custom name
+            const channelId = `Temperature sensor.${this.sanitizeName(customName)}`;
+            
+            await this.extendObjectAsync(channelId, {
+                type: "channel",
+                common: { name: customName },
+                native: {}
+            });
+            
+            // Verarbeite alle Records dieses Sensors
+            for (const record of records) {
+                if (!record.idDataAttribute) continue;
+                
+                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const name = record.description || record.code;
+                const value = record.formattedValue;
+                
+                let unit = "";
+                if (record.formatWithUnit) {
+                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                }
+                
+                await this.extendObjectAsync(dpId, {
+                    type: "state",
+                    common: {
+                        name: name,
+                        type: typeof value === "number" ? "number" : "string",
+                        role: this.determineRole(unit),
+                        unit: unit,
+                        read: true,
+                        write: false
+                    },
+                    native: {}
+                });
+                
+                await this.setStateAsync(dpId, value, true);
+            }
+        }
+    }
+
+    /**
+     * Verarbeitet generische Devices (Battery Monitor, Gateway, etc.)
+     */
+    async processGenericDevice(deviceType, instances) {
+        for (const [instanceKey, records] of Object.entries(instances)) {
+            // Für generische Devices: Channel nach Device-Typ benennen
+            let channelId = this.sanitizeName(deviceType);
+            if (Object.keys(instances).length > 1) {
+                // Falls mehrere Instances: Nummer anhängen
+                channelId += `_${instanceKey}`;
+            }
+            
+            await this.extendObjectAsync(channelId, {
+                type: "channel",
+                common: { name: deviceType },
+                native: {}
+            });
+            
+            // Verarbeite alle Records
+            for (const record of records) {
+                if (!record.idDataAttribute) continue;
+                
+                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const name = record.description || record.code;
+                const value = record.formattedValue;
+                
+                let unit = "";
+                if (record.formatWithUnit) {
+                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                }
+                
+                await this.extendObjectAsync(dpId, {
+                    type: "state",
+                    common: {
+                        name: name,
+                        type: typeof value === "number" ? "number" : "string",
+                        role: this.determineRole(unit),
+                        unit: unit,
+                        read: true,
+                        write: false
+                    },
+                    native: {}
+                });
+                
+                await this.setStateAsync(dpId, value, true);
+            }
+        }
+    }
+
+    /**
+     * Sanitiert Namen für ioBroker-IDs (erlaubt nur A-Z, 0-9, _ und .)
+     */
+    sanitizeName(name) {
+        if (!name) return "unknown";
+        return String(name)
+            .toLowerCase()
+            .replace(/[^a-z0-9._]/g, "_")
+            .replace(/_+/g, "_")
+            .replace(/^_|_$/g, "");
     }
 
     /**

@@ -74,7 +74,14 @@ class VictronVrm extends utils.Adapter {
                     
                     const device = record.Device || "Unknown";
                     const instance = record.instance || 0;
-                    const deviceKey = `${device}_${instance}`;
+                    
+                    // GPS bekommt einen separaten Schlüssel, unabhängig von Instance
+                    let deviceKey;
+                    if (device === "GPS") {
+                        deviceKey = "GPS";
+                    } else {
+                        deviceKey = `${device}_${instance}`;
+                    }
                     
                     if (!groupedByDevice[deviceKey]) {
                         groupedByDevice[deviceKey] = [];
@@ -85,14 +92,22 @@ class VictronVrm extends utils.Adapter {
                 // Verarbeite jede Device-Gruppe
                 for (const deviceKey in groupedByDevice) {
                     const records = groupedByDevice[deviceKey];
-                    const [device, instance] = deviceKey.split("_");
+                    let deviceId, deviceName;
+                    
+                    if (deviceKey === "GPS") {
+                        deviceId = "GPS";
+                        deviceName = "GPS Location";
+                    } else {
+                        const [device, instance] = deviceKey.split("_");
+                        deviceId = `${device}${instance}`;
+                        deviceName = `${device} (Instance ${instance})`;
+                    }
                     
                     // Erstelle Device-Kanal
-                    const deviceId = `${device}${instance}`;
                     await this.extendObjectAsync(deviceId, {
                         type: "channel",
                         common: {
-                            name: `${device} (Instance ${instance})`
+                            name: deviceName
                         },
                         native: {}
                     });

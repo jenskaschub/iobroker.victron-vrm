@@ -1,69 +1,66 @@
 {
   "common": {
     "name": "victron-vrm",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "news": {
+      "0.2.0": {
+        "en": "Added PV Solar Forecast and consumption forecast tracking via the VRM Stats endpoint.",
+        "de": "PV-Solarprognose und Verbrauchsprognose über den VRM-Stats-Endpunkt hinzugefügt."
+      },
       "0.1.0": {
-        "en": "initial version",
-        "de": "Erste Version"
+        "en": "Initial release fetching diagnostic logs via Cloud API.",
+        "de": "Erste Version zum Abrufen von Diagnoseprotokollen über die Cloud-API."
       }
     },
-    "title": "Victron VRM",
     "titleLang": {
-      "en": "Victron VRM",
-      "de": "Victron VRM"
+      "en": "Victron VRM API Data Import",
+      "de": "Victron VRM API Datenimport"
     },
     "desc": {
-      "en": "Reads diagnostics data from the Victron VRM API and creates matching ioBroker objects with correct units and roles.",
-      "de": "Liest Diagnosedaten aus der Victron VRM API und legt passende ioBroker-Objekte mit korrekten Units und Rollen an."
+      "en": "Imports diagnostics, solar production forecasts, and consumption forecasts from the Victron VRM Portal without requiring local LAN access.",
+      "de": "Importiert Diagnosedaten, Solarertragsprognosen und Verbrauchsprognosen aus dem Victron VRM-Portal, ohne lokalen LAN-Zugriff zu benötigen."
     },
     "authors": [
-      "Jens"
+      "jenskaschub <jens@kaschub.de>"
     ],
     "keywords": [
       "victron",
       "vrm",
       "solar",
-      "battery",
+      "forecast",
+      "ess",
       "energy"
     ],
     "license": "MIT",
+    "licenseInformation": {
+      "license": "MIT",
+      "link": "https://opensource.org"
+    },
     "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "icon": "victron-vrm.png",
+    "enabled": true,
+    "extIcon": "https://githubusercontent.com",
+    "readme": "https://github.com",
+    "loglevel": "info",
     "mode": "daemon",
+    "type": "energy",
+    "tier": 3,
     "compact": true,
     "connectionType": "cloud",
     "dataSource": "poll",
-    "materialize": false,
-    "icon": "victron-vrm.png",
-    "enabled": true,
-    "extIcon": "",
-    "type": "energy",
-    "adminUI": {
-      "config": "json"
-    },
+    "materialize": true,
     "dependencies": [
       {
         "js-controller": ">=5.0.0"
       }
-    ],
-    "globalDependencies": [
-      {
-        "admin": ">=6.0.0"
-      }
     ]
   },
   "native": {
-    "vrmToken": "",
-    "installationId": "",
-    "pollInterval": 30
+    "token": "",
+    "idSite": "",
+    "interval": 30
   },
-  "encryptedNative": [
-    "vrmToken"
-  ],
-  "protectedNative": [
-    "vrmToken"
-  ],
-  "objects": [],
   "instanceObjects": [
     {
       "_id": "info",
@@ -78,7 +75,7 @@
       "type": "state",
       "common": {
         "role": "indicator.connected",
-        "name": "Verbindung zur VRM API",
+        "name": "API connection status",
         "type": "boolean",
         "read": true,
         "write": false,

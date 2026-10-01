@@ -55,15 +55,11 @@ class VictronVrm extends utils.Adapter {
         try {
             const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
             const url = `${baseUrl}/diagnostics`;
-            this.log.info(`Fetching diagnostics from: ${url}`);
-            
             const response = await axios.get(url, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
 
-            this.log.info(`API Response: ${JSON.stringify(response.data)}`);
-
-            if (response.data && response.data.records) {
+            if (response.data && response.data.success && response.data.records) {
                 this.setState("info.connection", true, true);
                 
                 for (const record of response.data.records) {
@@ -153,10 +149,6 @@ class VictronVrm extends utils.Adapter {
                         }
                     }
                 }
-                this.log.info(`Processed ${response.data.records.length} diagnostic records`);
-            } else {
-                this.log.warn(`No records found in response`);
-                this.setState("info.connection", false, true);
             }
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);

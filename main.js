@@ -367,9 +367,8 @@ class VictronVrm extends utils.Adapter {
 
     /**
      * Holt die PV-Prognose und den Verbrauchs-Forecast
-     * Nutzt den korrekten Endpoint type=forecast mit expliziten start/end Parametern,
-     * da die API ohne diese Parameter nur rückwirkende Daten (letzte 24h) liefert,
-     * nicht die tatsächliche Zukunftsprognose.
+     * Ruft sowohl stündliche Daten (nächste 48h) als auch tägliche Aggregaten 
+     * (Morgen, Übermorgen) ab
      */
     async fetchForecastData() {
         try {
@@ -378,34 +377,67 @@ class VictronVrm extends utils.Adapter {
             const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
             const nowSec = Math.floor(Date.now() / 1000);
             const endSec = nowSec + (48 * 3600); // 48 Stunden in die Zukunft
-            const url = `${baseUrl}/stats?type=forecast&interval=hours&start=${nowSec}&end=${endSec}`;
 
-            this.log.debug(`Fetching forecast from: ${url}`);
-            const response = await axios.get(url, {
+            // Abruf stündliche Daten
+            this.log.debug(`Fetching hourly forecast from: ${baseUrl}/stats?type=forecast&interval=hours&start=${nowSec}&end=${endSec}`);
+            const hourlyResponse = await axios.get(`${baseUrl}/stats?type=forecast&interval=hours&start=${nowSec}&end=${endSec}`, {
                 headers: this.getHeaders()
             });
 
-            if (response.data && response.data.success && response.data.records) {
-                const records = response.data.records;
-                this.log.debug(`Forecast response keys: ${Object.keys(records).join(", ")}`);
+            if (hourlyResponse.data && hourlyResponse.data.success && hourlyResponse.data.records) {
+                const records = hourlyResponse.data.records;
+                this.log.debug(`Hourly forecast response keys: ${Object.keys(records).join(", ")}`);
 
-                // Solar-Ertrag Prognose
+                // Solar-Ertrag Prognose (stündlich)
                 if (Array.isArray(records.solar_yield_forecast) && records.solar_yield_forecast.length > 0) {
-                    await this.processForecastRecords(records.solar_yield_forecast, "forecast.solar");
-                    this.log.info("PV-Forecast erfolgreich verarbeitet");
+                    await this.processForecastRecordsHourly(records.solar_yield_forecast, "forecast.solar");
+                    this.log.info("PV-Forecast (stündlich) erfolgreich verarbeitet");
                 } else {
-                    this.log.info("Keine PV-Forecast-Daten verfügbar");
+                    this.log.info("Keine PV-Forecast-Daten (stündlich) verfügbar");
                 }
 
-                // Verbrauchs-Prognose
+                // Verbrauchs-Prognose (stündlich)
                 if (Array.isArray(records.vrm_consumption_fc) && records.vrm_consumption_fc.length > 0) {
-                    await this.processForecastRecords(records.vrm_consumption_fc, "forecast.consumption");
-                    this.log.info("Verbrauchs-Forecast erfolgreich verarbeitet");
+                    await this.processForecastRecordsHourly(records.vrm_consumption_fc, "forecast.consumption");
+                    this.log.info("Verbrauchs-Forecast (stündlich) erfolgreich verarbeitet");
                 } else {
-                    this.log.info("Keine Verbrauchs-Forecast-Daten verfügbar");
+                    this.log.info("Keine Verbrauchs-Forecast-Daten (stündlich) verfügbar");
                 }
             } else {
-                this.log.warn("Forecast: unerwartete Response-Struktur");
+                this.log.warn("Hourly Forecast: unerwartete Response-Struktur");
+            }
+
+            // Abruf tägliche Daten (Morgen, Übermorgen)
+            // Berechne Start auf Mitternacht morgen und Ende auf Ende Übermorgen
+            const tomorrowStart = Math.floor((nowSec + 86400) / 86400) * 86400;
+            const dayAfterTomorrowEnd = tomorrowStart + (2 * 86400);
+            
+            this.log.debug(`Fetching daily forecast from: ${baseUrl}/stats?type=forecast&interval=days&start=${tomorrowStart}&end=${dayAfterTomorrowEnd}`);
+            const dailyResponse = await axios.get(`${baseUrl}/stats?type=forecast&interval=days&start=${tomorrowStart}&end=${dayAfterTomorrowEnd}`, {
+                headers: this.getHeaders()
+            });
+
+            if (dailyResponse.data && dailyResponse.data.success && dailyResponse.data.records) {
+                const records = dailyResponse.data.records;
+                this.log.debug(`Daily forecast response keys: ${Object.keys(records).join(", ")}`);
+
+                // Solar-Ertrag Prognose (täglich)
+                if (Array.isArray(records.solar_yield_forecast) && records.solar_yield_forecast.length > 0) {
+                    await this.processForecastRecordsDaily(records.solar_yield_forecast, "forecast.solar");
+                    this.log.info("PV-Forecast (täglich) erfolgreich verarbeitet");
+                } else {
+                    this.log.info("Keine PV-Forecast-Daten (täglich) verfügbar");
+                }
+
+                // Verbrauchs-Prognose (täglich)
+                if (Array.isArray(records.vrm_consumption_fc) && records.vrm_consumption_fc.length > 0) {
+                    await this.processForecastRecordsDaily(records.vrm_consumption_fc, "forecast.consumption");
+                    this.log.info("Verbrauchs-Forecast (täglich) erfolgreich verarbeitet");
+                } else {
+                    this.log.info("Keine Verbrauchs-Forecast-Daten (täglich) verfügbar");
+                }
+            } else {
+                this.log.warn("Daily Forecast: unerwartete Response-Struktur");
             }
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Forecast-Daten: ${error.message}`);
@@ -413,17 +445,17 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Hilfsfunktion: Verarbeitet ein [Timestamp(ms), Value] Array in States
+     * Verarbeitet stündliche Forecast-Daten: [Timestamp(ms), Value] Array
      */
-    async processForecastRecords(rawEntries, baseChannel) {
+    async processForecastRecordsHourly(rawEntries, baseChannel) {
         if (!Array.isArray(rawEntries) || rawEntries.length === 0) {
-            this.log.warn(`No forecast entries found for ${baseChannel}`);
+            this.log.warn(`No hourly forecast entries found for ${baseChannel}`);
             return;
         }
 
-        this.log.info(`Processing ${rawEntries.length} forecast entries for ${baseChannel}`);
+        this.log.info(`Processing ${rawEntries.length} hourly forecast entries for ${baseChannel}`);
 
-        // Iteriert durch das [Timestamp, Value] Format der API
+        // Konvertiere zu Sekunden
         const entries = rawEntries.map(item => {
             if (Array.isArray(item) && item.length >= 2) {
                 return { timestamp: Math.round(item[0] / 1000), value: item[1] };
@@ -432,41 +464,13 @@ class VictronVrm extends utils.Adapter {
         }).filter(item => item !== null).sort((a, b) => a.timestamp - b.timestamp);
 
         if (entries.length === 0) {
-            this.log.warn(`No valid forecast entries after parsing for ${baseChannel}`);
+            this.log.warn(`No valid hourly forecast entries after parsing for ${baseChannel}`);
             return;
         }
 
-        // Da wir die API bereits mit start=jetzt abgefragt haben, sind alle Einträge
-        // bereits zukünftig (bzw. das aktuelle Segment). Dennoch zur Sicherheit filtern.
-        const nowSec = Math.floor(Date.now() / 1000);
-        const futureEntries = entries.filter(e => e.timestamp >= nowSec - 3600);
-        const relevantEntries = futureEntries.length > 0 ? futureEntries : entries;
-
-        // Erstelle Forecast Channel
-        await this.extendObjectAsync(baseChannel, {
-            type: "channel",
-            common: { name: baseChannel.replace("forecast.", "") },
-            native: {}
-        });
-
-        // Speichere die kompletten Rohdaten als JSON-String
-        const jsonDpId = `${baseChannel}.raw_json`;
-        await this.extendObjectAsync(jsonDpId, {
-            type: "state",
-            common: {
-                name: "Rohdaten Forecast (JSON)",
-                type: "string",
-                role: "json",
-                read: true,
-                write: false
-            },
-            native: {}
-        });
-        await this.setStateAsync(jsonDpId, JSON.stringify(relevantEntries), true);
-
-        // Schreibt die nächsten 12 stündlichen Segmente in Einzeldatenpunkte
-        for (let i = 0; i < Math.min(relevantEntries.length, 12); i++) {
-            const entry = relevantEntries[i];
+        // Schreibt die nächsten 12 stündlichen Segmente
+        for (let i = 0; i < Math.min(entries.length, 12); i++) {
+            const entry = entries[i];
             const dateStr = new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             
             const dpValueId = `${baseChannel}.plus_${i}_hour.value`;
@@ -478,7 +482,7 @@ class VictronVrm extends utils.Adapter {
                     name: `In ${i} Stunden (${dateStr})`,
                     type: "number",
                     role: "value.power",
-                    unit: "kWh",
+                    unit: "Wh",
                     read: true,
                     write: false
                 },
@@ -498,6 +502,55 @@ class VictronVrm extends utils.Adapter {
                 native: {}
             });
             await this.setStateAsync(dpTimeId, dateStr, true);
+        }
+    }
+
+    /**
+     * Verarbeitet tägliche Forecast-Daten: [Timestamp(ms), Value] Array
+     * Speichert Werte als day_1 (morgen), day_2 (übermorgen)
+     */
+    async processForecastRecordsDaily(rawEntries, baseChannel) {
+        if (!Array.isArray(rawEntries) || rawEntries.length === 0) {
+            this.log.warn(`No daily forecast entries found for ${baseChannel}`);
+            return;
+        }
+
+        this.log.info(`Processing ${rawEntries.length} daily forecast entries for ${baseChannel}`);
+
+        // Konvertiere zu Sekunden und sortiere
+        const entries = rawEntries.map(item => {
+            if (Array.isArray(item) && item.length >= 2) {
+                return { timestamp: Math.round(item[0] / 1000), value: item[1] };
+            }
+            return null;
+        }).filter(item => item !== null).sort((a, b) => a.timestamp - b.timestamp);
+
+        if (entries.length === 0) {
+            this.log.warn(`No valid daily forecast entries after parsing for ${baseChannel}`);
+            return;
+        }
+
+        // Schreibe die ersten 2 Tage (Morgen, Übermorgen)
+        for (let i = 0; i < Math.min(entries.length, 2); i++) {
+            const entry = entries[i];
+            const date = new Date(entry.timestamp * 1000);
+            const dateStr = date.toLocaleDateString('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric' });
+            
+            const dpId = `${baseChannel}.day_${i + 1}`;
+
+            await this.extendObjectAsync(dpId, {
+                type: "state",
+                common: {
+                    name: `${dateStr} (Tag ${i + 1})`,
+                    type: "number",
+                    role: "value.energy",
+                    unit: "Wh",
+                    read: true,
+                    write: false
+                },
+                native: {}
+            });
+            await this.setStateAsync(dpId, entry.value, true);
         }
     }
 

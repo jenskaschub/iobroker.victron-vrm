@@ -176,7 +176,7 @@ class VictronVrm extends utils.Adapter {
                 if (!record.idDataAttribute) continue;
                 if (record.code === "tcn") continue; // tcn ist nur der Channel-Name, nicht ein State
                 
-                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const dpId = `${channelId}.${this.sanitizeName(record.description || record.code)}`;
                 const name = record.description || record.code;
                 const value = record.rawValue;
                 
@@ -223,7 +223,7 @@ class VictronVrm extends utils.Adapter {
                 if (!record.idDataAttribute) continue;
                 if (record.code === "tscn") continue; // tscn ist nur der Channel-Name, nicht ein State
                 
-                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const dpId = `${channelId}.${this.sanitizeName(record.description || record.code)}`;
                 const name = record.description || record.code;
                 const value = record.rawValue;
                 
@@ -281,8 +281,8 @@ class VictronVrm extends utils.Adapter {
                 
                 const isGps = record.dbusServiceType === "gps";
                 const dpId = isGps
-                    ? `${gpsChannelId}.${this.sanitizeName(record.code)}`
-                    : `${channelId}.${this.sanitizeName(record.code)}`;
+                    ? `${gpsChannelId}.${this.sanitizeName(record.description || record.code)}`
+                    : `${channelId}.${this.sanitizeName(record.description || record.code)}`;
                 const name = record.description || record.code;
                 const value = record.rawValue;
                 
@@ -328,7 +328,7 @@ class VictronVrm extends utils.Adapter {
             for (const record of records) {
                 if (!record.idDataAttribute) continue;
                 
-                const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
+                const dpId = `${channelId}.${this.sanitizeName(record.description || record.code)}`;
                 const name = record.description || record.code;
                 const value = record.rawValue;
                 

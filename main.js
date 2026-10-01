@@ -55,17 +55,12 @@ class VictronVrm extends utils.Adapter {
         try {
             const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
             const url = `${baseUrl}/diagnostics`;
-            this.log.debug(`Fetching from: ${url}`);
-            
             const response = await axios.get(url, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
 
-            this.log.debug(`Response status: ${response.status}, has records: ${!!response.data?.records}`);
-
             if (response.data && response.data.success && response.data.records) {
                 this.setState("info.connection", true, true);
-                this.log.info(`Processing ${response.data.records.length} records`);
                 
                 for (const record of response.data.records) {
                     if (!record.idAttribute) continue;
@@ -93,97 +88,71 @@ class VictronVrm extends utils.Adapter {
                     });
                     
                     await this.setStateAsync(dpId, value, true);
-                }
 
-                // Extrahiere Custom Names für Tanks und Temperatur-Sensoren
-                this.extractCustomNames(response.data.records);
-                
-            } else {
-                this.log.warn(`Response structure unexpected. Success: ${response.data?.success}, Records: ${response.data?.records ? 'yes' : 'no'}`);
+                    // Tank custom name extraction
+                    if (/Tank\d+/i.test(record.idAttribute)) {
+                        const match = record.idAttribute.match(/Tank(\d+)/i);
+                        if (match) {
+                            const tankNumber = match[1];
+                            const tankChannelId = `Tank${tankNumber}`;
+                            const tankDpId = `${tankChannelId}.tank_custom_name`;
+
+                            await this.extendObjectAsync(tankChannelId, {
+                                type: "channel",
+                                common: { name: "Tank" },
+                                native: {}
+                            });
+
+                            await this.extendObjectAsync(tankDpId, {
+                                type: "state",
+                                common: {
+                                    name: "Tank Custom Name",
+                                    type: "string",
+                                    role: "info.name",
+                                    read: true,
+                                    write: false
+                                },
+                                native: {}
+                            });
+
+                            await this.setStateAsync(tankDpId, record.description || record.code || `Tank ${tankNumber}`, true);
+                        }
+                    }
+
+                    // Temperature sensor custom name extraction
+                    if (/Temperature.*Sensor\d+/i.test(record.idAttribute)) {
+                        const match = record.idAttribute.match(/Sensor(\d+)/i) || record.idAttribute.match(/(\d+)$/);
+                        if (match) {
+                            const sensorNumber = match[1];
+                            const sensorChannelId = `Temperature sensor${sensorNumber}`;
+                            const sensorDpId = `${sensorChannelId}.temperature_custom_name`;
+
+                            await this.extendObjectAsync(sensorChannelId, {
+                                type: "channel",
+                                common: { name: "Temperature Sensor" },
+                                native: {}
+                            });
+
+                            await this.extendObjectAsync(sensorDpId, {
+                                type: "state",
+                                common: {
+                                    name: "Temperature Sensor Custom Name",
+                                    type: "string",
+                                    role: "info.name",
+                                    read: true,
+                                    write: false
+                                },
+                                native: {}
+                            });
+
+                            await this.setStateAsync(sensorDpId, record.description || record.code || `Temperature Sensor ${sensorNumber}`, true);
+                        }
+                    }
+                }
             }
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);
-            if (error.response) {
-                this.log.error(`HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`);
-            }
             this.setState("info.connection", false, true);
-        }
-    }
-
-    /**
-     * Extrahiert Custom Names für Tank und Temperature Sensor Channels
-     */
-    extractCustomNames(records) {
-        try {
-            for (const record of records) {
-                if (!record.idAttribute) continue;
-
-                // Tank Custom Names
-                if (/Tank\d+/i.test(record.idAttribute)) {
-                    const match = record.idAttribute.match(/Tank(\d+)/i);
-                    if (match) {
-                        const tankNumber = match[1];
-                        const tankChannelId = `Tank${tankNumber}`;
-                        const customName = record.description || record.code || `Tank ${tankNumber}`;
-                        
-                        this.extendObjectAsync(tankChannelId, {
-                            type: "channel",
-                            common: { name: "Tank" },
-                            native: {}
-                        }).catch(e => this.log.debug(`Tank channel creation: ${e.message}`));
-
-                        const dpId = `${tankChannelId}.tank_custom_name`;
-                        this.extendObjectAsync(dpId, {
-                            type: "state",
-                            common: {
-                                name: "Tank Custom Name",
-                                type: "string",
-                                role: "info.name",
-                                read: true,
-                                write: false
-                            },
-                            native: {}
-                        }).catch(e => this.log.debug(`Tank DP creation: ${e.message}`));
-
-                        this.setStateAsync(dpId, customName, true)
-                            .catch(e => this.log.debug(`Tank state set: ${e.message}`));
-                    }
-                }
-
-                // Temperature Sensor Custom Names
-                if (/Temperature.*Sensor\d+/i.test(record.idAttribute)) {
-                    const match = record.idAttribute.match(/Sensor(\d+)/i) || record.idAttribute.match(/(\d+)$/);
-                    if (match) {
-                        const sensorNumber = match[1];
-                        const sensorChannelId = `Temperature sensor${sensorNumber}`;
-                        const customName = record.description || record.code || `Temperature Sensor ${sensorNumber}`;
-                        
-                        this.extendObjectAsync(sensorChannelId, {
-                            type: "channel",
-                            common: { name: "Temperature Sensor" },
-                            native: {}
-                        }).catch(e => this.log.debug(`Sensor channel creation: ${e.message}`));
-
-                        const dpId = `${sensorChannelId}.temperature_custom_name`;
-                        this.extendObjectAsync(dpId, {
-                            type: "state",
-                            common: {
-                                name: "Temperature Sensor Custom Name",
-                                type: "string",
-                                role: "info.name",
-                                read: true,
-                                write: false
-                            },
-                            native: {}
-                        }).catch(e => this.log.debug(`Sensor DP creation: ${e.message}`));
-
-                        this.setStateAsync(dpId, customName, true)
-                            .catch(e => this.log.debug(`Sensor state set: ${e.message}`));
-                    }
-                }
-            }
-        } catch (error) {
-            this.log.debug(`extractCustomNames error: ${error.message}`);
         }
     }
 

@@ -136,7 +136,7 @@ class VictronVrm extends utils.Adapter {
             const customNameRecord = records.find(r => r.code === "tcn");
             const customName = customNameRecord ? customNameRecord.description : `Tank ${instanceKey}`;
             
-            // Erstelle Channel für diesen Tank mit seinem custom name
+            // Erstelle Channel für diesen Tank mit seinem custom name als Channel-Name
             const channelId = `Tank.${this.sanitizeName(customName)}`;
             
             await this.extendObjectAsync(channelId, {
@@ -145,9 +145,10 @@ class VictronVrm extends utils.Adapter {
                 native: {}
             });
             
-            // Verarbeite alle Records dieses Tanks
+            // Verarbeite alle Records dieses Tanks (AUSSER tcn, das ist nur für den Namen)
             for (const record of records) {
                 if (!record.idDataAttribute) continue;
+                if (record.code === "tcn") continue; // tcn ist nur der Channel-Name, nicht ein State
                 
                 const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
@@ -185,7 +186,7 @@ class VictronVrm extends utils.Adapter {
             const customNameRecord = records.find(r => r.code === "tscn");
             const customName = customNameRecord ? customNameRecord.description : `Temperature sensor ${instanceKey}`;
             
-            // Erstelle Channel für diesen Sensor mit seinem custom name
+            // Erstelle Channel für diesen Sensor mit seinem custom name als Channel-Name
             const channelId = `Temperature sensor.${this.sanitizeName(customName)}`;
             
             await this.extendObjectAsync(channelId, {
@@ -194,9 +195,10 @@ class VictronVrm extends utils.Adapter {
                 native: {}
             });
             
-            // Verarbeite alle Records dieses Sensors
+            // Verarbeite alle Records dieses Sensors (AUSSER tscn, das ist nur für den Namen)
             for (const record of records) {
                 if (!record.idDataAttribute) continue;
+                if (record.code === "tscn") continue; // tscn ist nur der Channel-Name, nicht ein State
                 
                 const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
@@ -296,25 +298,43 @@ class VictronVrm extends utils.Adapter {
             const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
 
             // 1. PV-Prognose (solar_forecast)
-            const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
-            const resSolar = await axios.get(urlSolar, {
-                headers: this.getHeaders()
-            });
-            if (resSolar.data && resSolar.data.success && resSolar.data.records) {
-                await this.processForecastRecords(resSolar.data.records, "forecast.solar");
+            try {
+                const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
+                this.log.debug(`Fetching solar forecast from: ${urlSolar}`);
+                const resSolar = await axios.get(urlSolar, {
+                    headers: this.getHeaders()
+                });
+                this.log.debug(`Solar forecast response: success=${resSolar.data?.success}, has records=${!!resSolar.data?.records}`);
+                if (resSolar.data && resSolar.data.success && resSolar.data.records) {
+                    await this.processForecastRecords(resSolar.data.records, "forecast.solar");
+                    this.log.info("PV-Forecast erfolgreich verarbeitet");
+                } else {
+                    this.log.warn(`Solar forecast: unexpected response structure`);
+                }
+            } catch (error) {
+                this.log.error(`Fehler beim Abruf der Solar-Prognose: ${error.message}`);
             }
 
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
-            const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
-            const resCons = await axios.get(urlCons, {
-                headers: this.getHeaders()
-            });
-            if (resCons.data && resCons.data.success && resCons.data.records) {
-                await this.processForecastRecords(resCons.data.records, "forecast.consumption");
+            try {
+                const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
+                this.log.debug(`Fetching consumption forecast from: ${urlCons}`);
+                const resCons = await axios.get(urlCons, {
+                    headers: this.getHeaders()
+                });
+                this.log.debug(`Consumption forecast response: success=${resCons.data?.success}, has records=${!!resCons.data?.records}`);
+                if (resCons.data && resCons.data.success && resCons.data.records) {
+                    await this.processForecastRecords(resCons.data.records, "forecast.consumption");
+                    this.log.info("Verbrauchs-Forecast erfolgreich verarbeitet");
+                } else {
+                    this.log.warn(`Consumption forecast: unexpected response structure`);
+                }
+            } catch (error) {
+                this.log.error(`Fehler beim Abruf der Verbrauchs-Prognose: ${error.message}`);
             }
 
         } catch (error) {
-            this.log.error(`Fehler beim Abruf der Forecast-Daten: ${error.message}`);
+            this.log.error(`Fehler bei Forecast-Abruf: ${error.message}`);
         }
     }
 
@@ -332,7 +352,12 @@ class VictronVrm extends utils.Adapter {
             rawEntries = records;
         }
 
-        if (rawEntries.length === 0) return;
+        if (rawEntries.length === 0) {
+            this.log.warn(`No forecast entries found for ${baseChannel}`);
+            return;
+        }
+
+        this.log.info(`Processing ${rawEntries.length} forecast entries for ${baseChannel}`);
 
         // Iteriert durch das [Timestamp, Value] Format der API
         const entries = rawEntries.map(item => {
@@ -342,7 +367,17 @@ class VictronVrm extends utils.Adapter {
             return null;
         }).filter(item => item !== null).sort((a, b) => a.timestamp - b.timestamp);
 
-        if (entries.length === 0) return;
+        if (entries.length === 0) {
+            this.log.warn(`No valid forecast entries after parsing for ${baseChannel}`);
+            return;
+        }
+
+        // Erstelle Forecast Channel
+        await this.extendObjectAsync(baseChannel, {
+            type: "channel",
+            common: { name: baseChannel.replace("forecast.", "") },
+            native: {}
+        });
 
         // Speichere die kompletten Rohdaten als JSON-String
         const jsonDpId = `${baseChannel}.raw_json`;

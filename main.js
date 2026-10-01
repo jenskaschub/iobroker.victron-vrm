@@ -132,9 +132,9 @@ class VictronVrm extends utils.Adapter {
      */
     async processTanks(instances) {
         for (const [instanceKey, records] of Object.entries(instances)) {
-            // Finde den custom name (code: "tcn")
+            // Finde den custom name (code: "tcn") - nutze formattedValue, nicht description!
             const customNameRecord = records.find(r => r.code === "tcn");
-            const customName = customNameRecord ? customNameRecord.description : `Tank ${instanceKey}`;
+            const customName = customNameRecord ? customNameRecord.formattedValue : `Tank ${instanceKey}`;
             
             // Erstelle Channel für diesen Tank mit seinem custom name als Channel-Name
             const channelId = `Tank.${this.sanitizeName(customName)}`;
@@ -182,9 +182,9 @@ class VictronVrm extends utils.Adapter {
      */
     async processTemperatureSensors(instances) {
         for (const [instanceKey, records] of Object.entries(instances)) {
-            // Finde den custom name (code: "tscn")
+            // Finde den custom name (code: "tscn") - nutze formattedValue, nicht description!
             const customNameRecord = records.find(r => r.code === "tscn");
-            const customName = customNameRecord ? customNameRecord.description : `Temperature sensor ${instanceKey}`;
+            const customName = customNameRecord ? customNameRecord.formattedValue : `Temperature sensor ${instanceKey}`;
             
             // Erstelle Channel für diesen Sensor mit seinem custom name als Channel-Name
             const channelId = `Temperature sensor.${this.sanitizeName(customName)}`;
@@ -290,69 +290,53 @@ class VictronVrm extends utils.Adapter {
 
     /**
      * Holt die PV-Prognose und den Verbrauchs-Forecast
+     * Nutzt den korrekten Endpoint type=forecast, der alle Prognosedaten
+     * in einem gemeinsamen Response liefert (solar_yield_forecast, vrm_consumption_fc, etc.)
      */
     async fetchForecastData() {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
             const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
+            const url = `${baseUrl}/stats?type=forecast&interval=hours`;
 
-            // 1. PV-Prognose (solar_forecast)
-            try {
-                const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
-                this.log.debug(`Fetching solar forecast from: ${urlSolar}`);
-                const resSolar = await axios.get(urlSolar, {
-                    headers: this.getHeaders()
-                });
-                this.log.debug(`Solar forecast response: success=${resSolar.data?.success}, has records=${!!resSolar.data?.records}`);
-                if (resSolar.data && resSolar.data.success && resSolar.data.records) {
-                    await this.processForecastRecords(resSolar.data.records, "forecast.solar");
+            this.log.debug(`Fetching forecast from: ${url}`);
+            const response = await axios.get(url, {
+                headers: this.getHeaders()
+            });
+
+            if (response.data && response.data.success && response.data.records) {
+                const records = response.data.records;
+                this.log.debug(`Forecast response keys: ${Object.keys(records).join(", ")}`);
+
+                // Solar-Ertrag Prognose
+                if (Array.isArray(records.solar_yield_forecast) && records.solar_yield_forecast.length > 0) {
+                    await this.processForecastRecords(records.solar_yield_forecast, "forecast.solar");
                     this.log.info("PV-Forecast erfolgreich verarbeitet");
                 } else {
-                    this.log.warn(`Solar forecast: unexpected response structure`);
+                    this.log.info("Keine PV-Forecast-Daten verfügbar");
                 }
-            } catch (error) {
-                this.log.error(`Fehler beim Abruf der Solar-Prognose: ${error.message}`);
-            }
 
-            // 2. Verbrauchs-Prognose (vrm_consumption_fc)
-            try {
-                const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
-                this.log.debug(`Fetching consumption forecast from: ${urlCons}`);
-                const resCons = await axios.get(urlCons, {
-                    headers: this.getHeaders()
-                });
-                this.log.debug(`Consumption forecast response: success=${resCons.data?.success}, has records=${!!resCons.data?.records}`);
-                if (resCons.data && resCons.data.success && resCons.data.records) {
-                    await this.processForecastRecords(resCons.data.records, "forecast.consumption");
+                // Verbrauchs-Prognose
+                if (Array.isArray(records.vrm_consumption_fc) && records.vrm_consumption_fc.length > 0) {
+                    await this.processForecastRecords(records.vrm_consumption_fc, "forecast.consumption");
                     this.log.info("Verbrauchs-Forecast erfolgreich verarbeitet");
                 } else {
-                    this.log.warn(`Consumption forecast: unexpected response structure`);
+                    this.log.info("Keine Verbrauchs-Forecast-Daten verfügbar");
                 }
-            } catch (error) {
-                this.log.error(`Fehler beim Abruf der Verbrauchs-Prognose: ${error.message}`);
+            } else {
+                this.log.warn("Forecast: unerwartete Response-Struktur");
             }
-
         } catch (error) {
-            this.log.error(`Fehler bei Forecast-Abruf: ${error.message}`);
+            this.log.error(`Fehler beim Abruf der Forecast-Daten: ${error.message}`);
         }
     }
 
     /**
-     * Hilfsfunktion: Verarbeitet die verschachtelten Victron-Arrays
+     * Hilfsfunktion: Verarbeitet ein [Timestamp(ms), Value] Array in States
      */
-    async processForecastRecords(records, baseChannel) {
-        let rawEntries = [];
-        
-        // Victron liefert im Stats-Endpunkt ein Objekt zurück, dessen Key dynamisch dem Typ entspricht
-        const keys = Object.keys(records);
-        if (keys.length > 0 && Array.isArray(records[keys[0]])) {
-            rawEntries = records[keys[0]];
-        } else if (Array.isArray(records)) {
-            rawEntries = records;
-        }
-
-        if (rawEntries.length === 0) {
+    async processForecastRecords(rawEntries, baseChannel) {
+        if (!Array.isArray(rawEntries) || rawEntries.length === 0) {
             this.log.warn(`No forecast entries found for ${baseChannel}`);
             return;
         }
@@ -371,6 +355,11 @@ class VictronVrm extends utils.Adapter {
             this.log.warn(`No valid forecast entries after parsing for ${baseChannel}`);
             return;
         }
+
+        // Nur zukünftige Einträge (ab jetzt) berücksichtigen
+        const nowSec = Math.floor(Date.now() / 1000);
+        const futureEntries = entries.filter(e => e.timestamp >= nowSec - 3600);
+        const relevantEntries = futureEntries.length > 0 ? futureEntries : entries;
 
         // Erstelle Forecast Channel
         await this.extendObjectAsync(baseChannel, {
@@ -392,11 +381,11 @@ class VictronVrm extends utils.Adapter {
             },
             native: {}
         });
-        await this.setStateAsync(jsonDpId, JSON.stringify(entries), true);
+        await this.setStateAsync(jsonDpId, JSON.stringify(relevantEntries), true);
 
         // Schreibt die nächsten 12 stündlichen Segmente in Einzeldatenpunkte
-        for (let i = 0; i < Math.min(entries.length, 12); i++) {
-            const entry = entries[i];
+        for (let i = 0; i < Math.min(relevantEntries.length, 12); i++) {
+            const entry = relevantEntries[i];
             const dateStr = new Date(entry.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             
             const dpValueId = `${baseChannel}.plus_${i}_hour.value`;
@@ -408,7 +397,7 @@ class VictronVrm extends utils.Adapter {
                     name: `In ${i} Stunden (${dateStr})`,
                     type: "number",
                     role: "value.power",
-                    unit: "Wh",
+                    unit: "kWh",
                     read: true,
                     write: false
                 },

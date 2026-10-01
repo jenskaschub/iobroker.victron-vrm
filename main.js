@@ -53,7 +53,8 @@ class VictronVrm extends utils.Adapter {
      */
     async fetchDiagnosticsData() {
         try {
-            const url = `https://victronenergy.com{this.config.idSite}/diagnostics`;
+            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
+            const url = `${baseUrl}/diagnostics`;
             const response = await axios.get(url, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
@@ -102,8 +103,10 @@ class VictronVrm extends utils.Adapter {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
+            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
+
             // 1. PV-Prognose (solar_forecast)
-            const urlSolar = `https://victronenergy.com{this.config.idSite}/stats?type=solar_forecast&interval=hours`;
+            const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
             const resSolar = await axios.get(urlSolar, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
@@ -112,7 +115,7 @@ class VictronVrm extends utils.Adapter {
             }
 
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
-            const urlCons = `https://victronenergy.com{this.config.idSite}/stats?type=vrm_consumption_fc&interval=hours`;
+            const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
             const resCons = await axios.get(urlCons, {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });

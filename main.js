@@ -23,6 +23,19 @@ class VictronVrm extends utils.Adapter {
      * Is called when databases are connected and adapter received configuration.
      */
     async onReady() {
+        // Erstelle info.connection State-Objekt
+        await this.extendObjectAsync("info.connection", {
+            type: "state",
+            common: {
+                name: "VRM Connection Status",
+                type: "boolean",
+                role: "indicator.connection",
+                read: true,
+                write: false
+            },
+            native: {}
+        });
+
         // Validierung der Konfigurationswerte
         if (!this.config.token || !this.config.idSite) {
             this.log.error("VRM Access Token oder Installations-ID (idSite) fehlt in der Konfiguration!");
@@ -122,6 +135,8 @@ class VictronVrm extends utils.Adapter {
             await this.processTanks(instances);
         } else if (deviceType === "Temperature sensor") {
             await this.processTemperatureSensors(instances);
+        } else if (deviceType === "Gateway") {
+            await this.processGateway(instances);
         } else {
             await this.processGenericDevice(deviceType, instances);
         }
@@ -228,7 +243,66 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Verarbeitet generische Devices (Battery Monitor, Gateway, etc.)
+     * Verarbeitet Gateway-Daten und trennt GPS in eigenständigen Channel
+     */
+    async processGateway(instances) {
+        for (const [instanceKey, records] of Object.entries(instances)) {
+            const deviceType = "Gateway";
+            let channelId = this.sanitizeName(deviceType);
+            if (Object.keys(instances).length > 1) {
+                channelId += `_${instanceKey}`;
+            }
+            
+            // Gateway Channel
+            await this.extendObjectAsync(channelId, {
+                type: "channel",
+                common: { name: deviceType },
+                native: {}
+            });
+            
+            // GPS Channel (auf gleicher Ebene wie Gateway)
+            const gpsChannelId = "GPS";
+            await this.extendObjectAsync(gpsChannelId, {
+                type: "channel",
+                common: { name: "GPS" },
+                native: {}
+            });
+            
+            // Verarbeite alle Records
+            for (const record of records) {
+                if (!record.idDataAttribute) continue;
+                
+                const dpId = record.code.startsWith("gps_") 
+                    ? `${gpsChannelId}.${this.sanitizeName(record.code)}`
+                    : `${channelId}.${this.sanitizeName(record.code)}`;
+                const name = record.description || record.code;
+                const value = record.formattedValue;
+                
+                let unit = "";
+                if (record.formatWithUnit) {
+                    unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
+                }
+                
+                await this.extendObjectAsync(dpId, {
+                    type: "state",
+                    common: {
+                        name: name,
+                        type: typeof value === "number" ? "number" : "string",
+                        role: this.determineRole(unit),
+                        unit: unit,
+                        read: true,
+                        write: false
+                    },
+                    native: {}
+                });
+                
+                await this.setStateAsync(dpId, value, true);
+            }
+        }
+    }
+
+    /**
+     * Verarbeitet generische Devices (Battery Monitor, etc.)
      */
     async processGenericDevice(deviceType, instances) {
         for (const [instanceKey, records] of Object.entries(instances)) {

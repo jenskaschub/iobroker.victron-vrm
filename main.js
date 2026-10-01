@@ -123,7 +123,7 @@ class VictronVrm extends utils.Adapter {
                 await this.extendObjectAsync(tankChannelId, {
                     type: "channel",
                     common: {
-                        name: `Tank ${tankNumber}`
+                        name: "Tank"
                     },
                     native: {}
                 });
@@ -172,7 +172,7 @@ class VictronVrm extends utils.Adapter {
                 await this.extendObjectAsync(sensorChannelId, {
                     type: "channel",
                     common: {
-                        name: `Temperature Sensor ${sensorNumber}`
+                        name: "Temperature Sensor"
                     },
                     native: {}
                 });
@@ -341,7 +341,7 @@ class VictronVrm extends utils.Adapter {
 }
 
 if (require.main !== module) {
-    module.modules = (options) => new VictronVrm(options);
+    module.exports = (options) => new VictronVrm(options);
 } else {
     new VictronVrm();
 }

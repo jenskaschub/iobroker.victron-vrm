@@ -49,63 +49,39 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
+     * Baut die Standard-Header für API-Requests
+     */
+    getHeaders() {
+        return {
+            "X-Authorization": `Token ${this.config.token}`
+        };
+    }
+
+    /**
      * Holt die Standard-Diagnosedaten
      */
     async fetchDiagnosticsData() {
         try {
-            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
+            const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
             const url = `${baseUrl}/diagnostics`;
-            this.log.debug(`Fetching diagnostics from: ${url}`);
             
             const response = await axios.get(url, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: this.getHeaders()
             });
 
-            this.log.debug(`Response received, status: ${response.status}`);
-            this.log.info(`Full response.data structure: ${JSON.stringify(response.data).substring(0, 500)}`);
-            
-            let records = null;
-            
-            // Versuche records auf verschiedene Arten zu finden
-            if (response.data && response.data.records && Array.isArray(response.data.records)) {
-                records = response.data.records;
-                this.log.debug(`Records found in response.data.records`);
-            } else if (Array.isArray(response.data)) {
-                records = response.data;
-                this.log.debug(`response.data itself is an array`);
-            } else if (response.data && typeof response.data === "object") {
-                // Suche nach einem Array-Feld im response.data
-                const keys = Object.keys(response.data);
-                this.log.debug(`response.data top-level keys: ${keys.join(", ")}`);
-                for (const key of keys) {
-                    if (Array.isArray(response.data[key])) {
-                        records = response.data[key];
-                        this.log.debug(`Records found in response.data.${key}`);
-                        break;
-                    }
-                }
-            }
-
-            if (records && Array.isArray(records) && records.length > 0) {
-                this.log.info(`Processing ${records.length} diagnostic records`);
+            if (response.data && response.data.success && Array.isArray(response.data.records)) {
                 this.setState("info.connection", true, true);
                 
-                // Logge den ersten Record um die Feldstruktur zu sehen
-                this.log.info(`First record structure: ${JSON.stringify(records[0])}`);
-                
-                for (const record of records) {
-                    if (!record.idAttribute) {
-                        this.log.debug(`Record skipped - no idAttribute. Record keys: ${Object.keys(record).join(", ")}`);
-                        continue;
-                    }
+                for (const record of response.data.records) {
+                    if (!record.idDataAttribute) continue;
                     
-                    const dpId = `diagnostics.${record.idAttribute}`;
+                    const dpId = `diagnostics.${record.idDataAttribute}`;
                     const name = record.description || record.code;
                     const value = record.formattedValue; 
                     
                     let unit = "";
                     if (record.formatWithUnit) {
-                        unit = record.formatWithUnit.replace("%val", "").trim();
+                        unit = record.formatWithUnit.replace("%val", "").replace("%s", "").trim();
                     }
 
                     await this.extendObjectAsync(dpId, {
@@ -124,8 +100,8 @@ class VictronVrm extends utils.Adapter {
                     await this.setStateAsync(dpId, value, true);
 
                     // Tank custom name extraction
-                    if (/Tank\d+/i.test(record.idAttribute)) {
-                        const match = record.idAttribute.match(/Tank(\d+)/i);
+                    if (record.code && /^tank/i.test(record.code) || (record.description && /Tank\s*\d+/i.test(record.description))) {
+                        const match = (record.code || "").match(/tank(\d+)/i) || (record.description || "").match(/Tank\s*(\d+)/i);
                         if (match) {
                             const tankNumber = match[1];
                             const tankChannelId = `Tank${tankNumber}`;
@@ -154,8 +130,8 @@ class VictronVrm extends utils.Adapter {
                     }
 
                     // Temperature sensor custom name extraction
-                    if (/Temperature.*Sensor\d+/i.test(record.idAttribute)) {
-                        const match = record.idAttribute.match(/Sensor(\d+)/i) || record.idAttribute.match(/(\d+)$/);
+                    if (record.description && /Temperature.*Sensor\s*\d+/i.test(record.description)) {
+                        const match = record.description.match(/Sensor\s*(\d+)/i);
                         if (match) {
                             const sensorNumber = match[1];
                             const sensorChannelId = `Temperature sensor${sensorNumber}`;
@@ -184,7 +160,7 @@ class VictronVrm extends utils.Adapter {
                     }
                 }
             } else {
-                this.log.warn(`No records found. response.data type: ${typeof response.data}, is array: ${Array.isArray(response.data)}`);
+                this.log.warn(`Unerwartete API-Antwortstruktur bei diagnostics.`);
                 this.setState("info.connection", false, true);
             }
         } catch (error) {
@@ -200,12 +176,12 @@ class VictronVrm extends utils.Adapter {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
-            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
+            const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
 
             // 1. PV-Prognose (solar_forecast)
             const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
             const resSolar = await axios.get(urlSolar, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: this.getHeaders()
             });
             if (resSolar.data && resSolar.data.success && resSolar.data.records) {
                 await this.processForecastRecords(resSolar.data.records, "forecast.solar");
@@ -214,7 +190,7 @@ class VictronVrm extends utils.Adapter {
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
             const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
             const resCons = await axios.get(urlCons, {
-                headers: { "X-Authorization": `Bearer ${this.config.token}` }
+                headers: this.getHeaders()
             });
             if (resCons.data && resCons.data.success && resCons.data.records) {
                 await this.processForecastRecords(resCons.data.records, "forecast.consumption");

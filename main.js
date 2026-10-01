@@ -49,39 +49,34 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Baut die Standard-Header für API-Requests
-     */
-    getHeaders() {
-        return {
-            "X-Authorization": `Token ${this.config.token}`,
-            "Accept": "application/json",
-            "User-Agent": "ioBroker.victron-vrm/0.1.0"
-        };
-    }
-
-    /**
      * Holt die Standard-Diagnosedaten
      */
     async fetchDiagnosticsData() {
         try {
-            const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
+            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
             const url = `${baseUrl}/diagnostics`;
+            this.log.debug(`Fetching diagnostics from: ${url}`);
+            
             const response = await axios.get(url, {
-                headers: this.getHeaders()
+                headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
 
-            // Prüfe ob Antwort HTML statt JSON ist (z.B. Login-Seite bei ungültigem Token)
-            if (typeof response.data === "string" && response.data.trim().startsWith("<!doctype")) {
-                this.log.error("VRM API hat eine HTML-Seite statt JSON zurückgegeben. Bitte Token prüfen (evtl. abgelaufen oder ungültig).");
-                this.setState("info.connection", false, true);
-                return;
-            }
+            this.log.debug(`Response received, status: ${response.status}, has success: ${!!response.data?.success}, has records: ${Array.isArray(response.data?.records)}`);
 
-            if (response.data && response.data.records) {
+            if (response.data && response.data.success && response.data.records) {
+                this.log.info(`Processing ${response.data.records.length} diagnostic records`);
                 this.setState("info.connection", true, true);
                 
+                // Logge den ersten Record um die Feldstruktur zu sehen
+                if (response.data.records.length > 0) {
+                    this.log.debug(`First record structure: ${JSON.stringify(response.data.records[0])}`);
+                }
+                
                 for (const record of response.data.records) {
-                    if (!record.idAttribute) continue;
+                    if (!record.idAttribute) {
+                        this.log.debug(`Record skipped - no idAttribute. Record keys: ${Object.keys(record).join(", ")}`);
+                        continue;
+                    }
                     
                     const dpId = `diagnostics.${record.idAttribute}`;
                     const name = record.description || record.code;
@@ -168,14 +163,11 @@ class VictronVrm extends utils.Adapter {
                     }
                 }
             } else {
-                this.log.warn(`Unerwartete API-Antwortstruktur: ${JSON.stringify(response.data).substring(0, 200)}`);
+                this.log.warn(`Unexpected response structure. success: ${response.data?.success}, records is array: ${Array.isArray(response.data?.records)}`);
                 this.setState("info.connection", false, true);
             }
         } catch (error) {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);
-            if (error.response) {
-                this.log.error(`HTTP Status: ${error.response.status}`);
-            }
             this.setState("info.connection", false, true);
         }
     }
@@ -187,12 +179,12 @@ class VictronVrm extends utils.Adapter {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
-            const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
+            const baseUrl = `https://vrm.victronenergy.com/installation/${this.config.idSite}`;
 
             // 1. PV-Prognose (solar_forecast)
             const urlSolar = `${baseUrl}/stats?type=solar_forecast&interval=hours`;
             const resSolar = await axios.get(urlSolar, {
-                headers: this.getHeaders()
+                headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
             if (resSolar.data && resSolar.data.success && resSolar.data.records) {
                 await this.processForecastRecords(resSolar.data.records, "forecast.solar");
@@ -201,7 +193,7 @@ class VictronVrm extends utils.Adapter {
             // 2. Verbrauchs-Prognose (vrm_consumption_fc)
             const urlCons = `${baseUrl}/stats?type=vrm_consumption_fc&interval=hours`;
             const resCons = await axios.get(urlCons, {
-                headers: this.getHeaders()
+                headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
             if (resCons.data && resCons.data.success && resCons.data.records) {
                 await this.processForecastRecords(resCons.data.records, "forecast.consumption");

@@ -367,15 +367,18 @@ class VictronVrm extends utils.Adapter {
 
     /**
      * Holt die PV-Prognose und den Verbrauchs-Forecast
-     * Nutzt den korrekten Endpoint type=forecast, der alle Prognosedaten
-     * in einem gemeinsamen Response liefert (solar_yield_forecast, vrm_consumption_fc, etc.)
+     * Nutzt den korrekten Endpoint type=forecast mit expliziten start/end Parametern,
+     * da die API ohne diese Parameter nur rückwirkende Daten (letzte 24h) liefert,
+     * nicht die tatsächliche Zukunftsprognose.
      */
     async fetchForecastData() {
         try {
             this.log.debug("Frage Forecast-Daten von VRM API ab...");
             
             const baseUrl = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}`;
-            const url = `${baseUrl}/stats?type=forecast&interval=hours`;
+            const nowSec = Math.floor(Date.now() / 1000);
+            const endSec = nowSec + (48 * 3600); // 48 Stunden in die Zukunft
+            const url = `${baseUrl}/stats?type=forecast&interval=hours&start=${nowSec}&end=${endSec}`;
 
             this.log.debug(`Fetching forecast from: ${url}`);
             const response = await axios.get(url, {
@@ -433,7 +436,8 @@ class VictronVrm extends utils.Adapter {
             return;
         }
 
-        // Nur zukünftige Einträge (ab jetzt) berücksichtigen
+        // Da wir die API bereits mit start=jetzt abgefragt haben, sind alle Einträge
+        // bereits zukünftig (bzw. das aktuelle Segment). Dennoch zur Sicherheit filtern.
         const nowSec = Math.floor(Date.now() / 1000);
         const futureEntries = entries.filter(e => e.timestamp >= nowSec - 3600);
         const relevantEntries = futureEntries.length > 0 ? futureEntries : entries;

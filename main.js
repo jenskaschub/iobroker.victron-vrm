@@ -61,18 +61,39 @@ class VictronVrm extends utils.Adapter {
                 headers: { "X-Authorization": `Bearer ${this.config.token}` }
             });
 
-            this.log.debug(`Response received, status: ${response.status}, has success: ${!!response.data?.success}, has records: ${Array.isArray(response.data?.records)}`);
+            this.log.debug(`Response received, status: ${response.status}`);
+            this.log.info(`Full response.data structure: ${JSON.stringify(response.data).substring(0, 500)}`);
+            
+            let records = null;
+            
+            // Versuche records auf verschiedene Arten zu finden
+            if (response.data && response.data.records && Array.isArray(response.data.records)) {
+                records = response.data.records;
+                this.log.debug(`Records found in response.data.records`);
+            } else if (Array.isArray(response.data)) {
+                records = response.data;
+                this.log.debug(`response.data itself is an array`);
+            } else if (response.data && typeof response.data === "object") {
+                // Suche nach einem Array-Feld im response.data
+                const keys = Object.keys(response.data);
+                this.log.debug(`response.data top-level keys: ${keys.join(", ")}`);
+                for (const key of keys) {
+                    if (Array.isArray(response.data[key])) {
+                        records = response.data[key];
+                        this.log.debug(`Records found in response.data.${key}`);
+                        break;
+                    }
+                }
+            }
 
-            if (response.data && response.data.success && response.data.records) {
-                this.log.info(`Processing ${response.data.records.length} diagnostic records`);
+            if (records && Array.isArray(records) && records.length > 0) {
+                this.log.info(`Processing ${records.length} diagnostic records`);
                 this.setState("info.connection", true, true);
                 
                 // Logge den ersten Record um die Feldstruktur zu sehen
-                if (response.data.records.length > 0) {
-                    this.log.debug(`First record structure: ${JSON.stringify(response.data.records[0])}`);
-                }
+                this.log.info(`First record structure: ${JSON.stringify(records[0])}`);
                 
-                for (const record of response.data.records) {
+                for (const record of records) {
                     if (!record.idAttribute) {
                         this.log.debug(`Record skipped - no idAttribute. Record keys: ${Object.keys(record).join(", ")}`);
                         continue;
@@ -163,7 +184,7 @@ class VictronVrm extends utils.Adapter {
                     }
                 }
             } else {
-                this.log.warn(`Unexpected response structure. success: ${response.data?.success}, records is array: ${Array.isArray(response.data?.records)}`);
+                this.log.warn(`No records found. response.data type: ${typeof response.data}, is array: ${Array.isArray(response.data)}`);
                 this.setState("info.connection", false, true);
             }
         } catch (error) {

@@ -34,12 +34,16 @@ class VictronVrm extends utils.Adapter {
         
         // Erstmaliger Datenabruf beim Start
         await this.fetchDiagnosticsData();
+        await this.fetchTankData();
+        await this.fetchTemperatureSensorData();
         await this.fetchForecastData();
 
         // Intervall für Live-Diagnosedaten aus Config (Standard: 30s)
         const intervalSec = parseInt(this.config.interval, 10) || 30;
         this.updateInterval = this.setInterval(async () => {
             await this.fetchDiagnosticsData();
+            await this.fetchTankData();
+            await this.fetchTemperatureSensorData();
         }, intervalSec * 1000);
 
         // Prognosedaten ändern sich selten -> Abruf alle 30 Minuten
@@ -158,6 +162,92 @@ class VictronVrm extends utils.Adapter {
                 this.log.error(`HTTP Response: ${JSON.stringify(error.response.data)}`);
             }
             this.setState("info.connection", false, true);
+        }
+    }
+
+    /**
+     * Holt die Tank-Daten als benutzerdefinierte Namen
+     */
+    async fetchTankData() {
+        try {
+            const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}/diagnostics`;
+            const response = await axios.get(url, {
+                headers: { "X-Authorization": `Token ${this.config.token}` }
+            });
+
+            if (response.data && response.data.success && response.data.records) {
+                const tankRecords = response.data.records.filter(r =>
+                    r.idDataAttribute && /Tank\d+/i.test(r.idDataAttribute)
+                );
+
+                for (const record of tankRecords) {
+                    const match = record.idDataAttribute.match(/Tank(\d+)/i);
+                    if (!match) continue;
+
+                    const tankNumber = match[1];
+                    const dpId = `Tank${tankNumber}.tank_custom_name`;
+                    const customName = record.description || record.code || `Tank ${tankNumber}`;
+
+                    await this.extendObjectAsync(dpId, {
+                        type: "state",
+                        common: {
+                            name: "Tank Custom Name",
+                            type: "string",
+                            role: "info.name",
+                            read: true,
+                            write: false
+                        },
+                        native: {}
+                    });
+
+                    await this.setStateAsync(dpId, customName, true);
+                }
+            }
+        } catch (error) {
+            this.log.error(`Fehler beim Abruf der Tank-Daten: ${error.message}`);
+        }
+    }
+
+    /**
+     * Holt die Temperatur-Sensor-Daten als benutzerdefinierte Namen
+     */
+    async fetchTemperatureSensorData() {
+        try {
+            const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}/diagnostics`;
+            const response = await axios.get(url, {
+                headers: { "X-Authorization": `Token ${this.config.token}` }
+            });
+
+            if (response.data && response.data.success && response.data.records) {
+                const tempRecords = response.data.records.filter(r =>
+                    r.idDataAttribute && /Temperature.*Sensor\d+/i.test(r.idDataAttribute)
+                );
+
+                for (const record of tempRecords) {
+                    const match = record.idDataAttribute.match(/Sensor(\d+)/i) || record.idDataAttribute.match(/(\d+)$/);
+                    if (!match) continue;
+
+                    const sensorNumber = match[1];
+                    const dpId = `Temperature sensor${sensorNumber}.temperature_custom_name`;
+                    const customName = record.description || record.code || `Temperature Sensor ${sensorNumber}`;
+
+                    await this.extendObjectAsync(dpId, {
+                        type: "state",
+                        common: {
+                            name: "Temperature Sensor Custom Name",
+                            type: "string",
+                            role: "info.name",
+                            read: true,
+                            write: false
+                        },
+                        native: {}
+                    });
+
+                    await this.setStateAsync(dpId, customName, true);
+                }
+            }
+        } catch (error) {
+            this.log.error(`Fehler beim Abruf der Temperatur-Sensor-Daten: ${error.message}`);
         }
     }
 

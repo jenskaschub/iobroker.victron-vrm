@@ -22,13 +22,18 @@ class VictronVrm extends utils.Adapter {
     /**
      * Is called when databases are connected and adapter received configuration.
      */
-    async onReady() {
+        async onReady() {
+        // DEBUG-ZEILE: Zeigt im Log an, was wirklich ankommt (Token wird maskiert)
+        this.log.info(`DEBUG-CONFIG: idSite="${this.config.idSite}", Token-Länge=${this.config.token ? this.config.token.length : 0}, Intervall=${this.config.interval}`);
+
         // Überprüfen, ob die Konfiguration vorhanden ist
         if (!this.config.token || !this.config.idSite) {
             this.log.error("VRM Access Token oder Installations-ID (idSite) fehlt in der Konfiguration!");
             this.setState("info.connection", false, true);
             return;
         }
+        // ... restlicher Code
+
 
         this.log.info(`Starte Victron VRM Adapter für Instanz ${this.config.idSite}`);
         

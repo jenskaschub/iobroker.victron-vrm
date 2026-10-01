@@ -1,0 +1,12 @@
+{
+  "en": {
+    "token": "VRM Access Token",
+    "idSite": "Installation ID (idSite)",
+    "interval": "Update Interval (seconds)"
+  },
+  "de": {
+    "token": "VRM Access Token",
+    "idSite": "Installations-ID (idSite)",
+    "interval": "Aktualisierungsintervall (Sekunden)"
+  }
+}

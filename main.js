@@ -243,7 +243,9 @@ class VictronVrm extends utils.Adapter {
     }
 
     /**
-     * Verarbeitet Gateway-Daten und trennt GPS in eigenständigen Channel
+     * Verarbeitet Gateway-Daten und trennt GPS in eigenständigen Channel.
+     * GPS-Records werden über das Feld dbusServiceType === "gps" identifiziert
+     * (Codes: lt=Latitude, lg=Longitude, lc=Course, la=Altitude, etc.)
      */
     async processGateway(instances) {
         for (const [instanceKey, records] of Object.entries(instances)) {
@@ -272,7 +274,8 @@ class VictronVrm extends utils.Adapter {
             for (const record of records) {
                 if (!record.idDataAttribute) continue;
                 
-                const dpId = record.code.startsWith("gps_") 
+                const isGps = record.dbusServiceType === "gps";
+                const dpId = isGps
                     ? `${gpsChannelId}.${this.sanitizeName(record.code)}`
                     : `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;

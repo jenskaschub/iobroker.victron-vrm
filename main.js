@@ -178,7 +178,7 @@ class VictronVrm extends utils.Adapter {
                 
                 const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
-                const value = record.formattedValue;
+                const value = record.rawValue;
                 
                 const unit = this.cleanUnit(record.formatWithUnit);
                 
@@ -225,7 +225,7 @@ class VictronVrm extends utils.Adapter {
                 
                 const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
-                const value = record.formattedValue;
+                const value = record.rawValue;
                 
                 const unit = this.cleanUnit(record.formatWithUnit);
                 
@@ -284,7 +284,7 @@ class VictronVrm extends utils.Adapter {
                     ? `${gpsChannelId}.${this.sanitizeName(record.code)}`
                     : `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
-                const value = record.formattedValue;
+                const value = record.rawValue;
                 
                 const unit = this.cleanUnit(record.formatWithUnit);
                 
@@ -330,7 +330,7 @@ class VictronVrm extends utils.Adapter {
                 
                 const dpId = `${channelId}.${this.sanitizeName(record.code)}`;
                 const name = record.description || record.code;
-                const value = record.formattedValue;
+                const value = record.rawValue;
                 
                 const unit = this.cleanUnit(record.formatWithUnit);
                 

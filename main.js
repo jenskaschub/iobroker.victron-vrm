@@ -17,6 +17,9 @@ class VictronVrm extends utils.Adapter {
         
         this.updateInterval = null;
         this.forecastInterval = null;
+        this.alarmInterval = null;
+        this.knownObjects = new Set();
+        this.activeAlarmBases = new Set();
     }
 
     /**
@@ -48,6 +51,7 @@ class VictronVrm extends utils.Adapter {
         // Erstmaliger Datenabruf beim Start
         await this.fetchDiagnosticsData();
         await this.fetchForecastData();
+        await this.fetchAlarmLogData();
 
         // Intervall für Live-Diagnosedaten aus Config (Standard: 30s)
         const intervalSec = parseInt(this.config.interval, 10) || 30;
@@ -59,6 +63,11 @@ class VictronVrm extends utils.Adapter {
         this.forecastInterval = this.setInterval(async () => {
             await this.fetchForecastData();
         }, 30 * 60 * 1000);
+
+        // Alarme wie Diagnosedaten im konfigurierten Intervall aktualisieren.
+        this.alarmInterval = this.setInterval(async () => {
+            await this.fetchAlarmLogData();
+        }, intervalSec * 1000);
     }
 
     /**
@@ -113,6 +122,97 @@ class VictronVrm extends utils.Adapter {
             this.log.error(`Fehler beim Abruf der Diagnosedaten: ${error.message}`);
             this.setState("info.connection", false, true);
         }
+    }
+
+    /**
+     * Holt die aktiven Alarme aus dem VRM Alarm-Log
+     */
+    async fetchAlarmLogData() {
+        try {
+            const url = `https://vrmapi.victronenergy.com/v2/installations/${this.config.idSite}/alarm-log`;
+            const response = await axios.get(url, {
+                headers: this.getHeaders()
+            });
+
+            const records = response.data && response.data.records;
+            if (!Array.isArray(records)) {
+                this.log.warn(`Unerwartete API-Antwortstruktur bei alarm-log: ${JSON.stringify(response.data ?? null).slice(0, 500)}`);
+                return;
+            }
+
+            await this.processAlarmLog(records);
+        } catch (error) {
+            this.log.error(`Fehler beim Abruf der Alarmdaten: ${error.message}`);
+        }
+    }
+
+    /**
+     * Verarbeitet aktive Alarm-Log-Einträge und setzt beendete Alarme zurück
+     */
+    async processAlarmLog(records) {
+        const currentActiveBases = new Set();
+
+        for (const record of records) {
+            if (!record.isActive) continue;
+
+            const base = this.alarmPathFor(record);
+            currentActiveBases.add(base);
+
+            await this.ensureSimpleState(`${base}.Active`, "boolean", "indicator.alarm", true);
+            await this.ensureSimpleState(`${base}.Description`, "string", "value", record.description || "");
+            if (record.started) {
+                await this.ensureSimpleState(`${base}.Since`, "number", "value.time", record.started * 1000);
+            }
+        }
+
+        for (const base of this.activeAlarmBases) {
+            if (!currentActiveBases.has(base)) {
+                await this.ensureSimpleState(`${base}.Active`, "boolean", "indicator.alarm", false);
+            }
+        }
+
+        this.activeAlarmBases = currentActiveBases;
+    }
+
+    /**
+     * Erzeugt einen vom Diagnostics-Baum unabhängigen Pfad für einen Alarm
+     */
+    alarmPathFor(record) {
+        if (record.device) {
+            const deviceFolder = this.sanitizeName(record.device);
+            const sub = record.customName
+                ? this.sanitizeName(record.customName)
+                : record.instance !== null && record.instance !== undefined
+                    ? `instanz_${this.sanitizeName(record.instance)}`
+                    : "allgemein";
+            return `Alarms.${deviceFolder}.${sub}`;
+        }
+        return `Alarms.${this.sanitizeName(record.type || "Sonstige")}.${this.sanitizeName(record.idAlarm)}`;
+    }
+
+    async ensureSimpleState(path, type, role, value) {
+        const segments = path.split(".");
+        for (let i = 1; i < segments.length; i++) {
+            const channelPath = segments.slice(0, i).join(".");
+            if (!this.knownObjects.has(channelPath)) {
+                await this.extendObjectAsync(channelPath, {
+                    type: "channel",
+                    common: { name: segments[i - 1] },
+                    native: {}
+                });
+                this.knownObjects.add(channelPath);
+            }
+        }
+
+        if (!this.knownObjects.has(path)) {
+            await this.extendObjectAsync(path, {
+                type: "state",
+                common: { name: segments[segments.length - 1], type, role, read: true, write: false },
+                native: {}
+            });
+            this.knownObjects.add(path);
+        }
+        await this.setStateAsync(path, value, true);
     }
 
     /**
@@ -577,6 +677,7 @@ class VictronVrm extends utils.Adapter {
         try {
             if (this.updateInterval) this.clearInterval(this.updateInterval);
             if (this.forecastInterval) this.clearInterval(this.forecastInterval);
+            if (this.alarmInterval) this.clearInterval(this.alarmInterval);
             callback();
         } catch (e) {
             callback();

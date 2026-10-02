@@ -86,12 +86,16 @@ class VictronVrm extends utils.Adapter {
     /**
      * Bereinigt Unit-Strings: extrahiert nur den Teil nach dem letzten Leerzeichen
      * z.B. "%.1F Ah" → "Ah", "%d W" → "W", "%s" → ""
+     * Konvertiert auch %% zu % (VRM escaped Prozent)
      */
     cleanUnit(formatWithUnit) {
         if (!formatWithUnit) return "";
         const lastSpace = formatWithUnit.lastIndexOf(' ');
         if (lastSpace === -1) return ""; // Kein Leerzeichen = keine Unit
-        return formatWithUnit.substring(lastSpace + 1).trim();
+        let unit = formatWithUnit.substring(lastSpace + 1).trim();
+        // Ersetze %% durch % (VRM escaped Prozentzeichen)
+        unit = unit.replace(/%%/g, "%");
+        return unit;
     }
 
     /**
@@ -187,8 +191,8 @@ class VictronVrm extends utils.Adapter {
 
     /**
      * Generiert den ioBroker-Pfad für einen Alarm
-     * Struktur: Alarms.<Gerät>.<Name oder Instanz>
-     * Oder für gerätlose Alarme: Alarms.<Typ>.<idAlarm>
+     * Struktur: alarms.<Gerät>.<Name oder Instanz>
+     * Oder für gerätlose Alarme: alarms.<Typ>.<idAlarm>
      */
     alarmPathFor(record) {
         if (record.device) {
@@ -196,11 +200,11 @@ class VictronVrm extends utils.Adapter {
             const sub = record.customName
                 ? this.sanitizeName(record.customName)
                 : record.instance !== null && record.instance !== undefined
-                    ? `Instanz_${record.instance}`
-                    : 'Allgemein';
-            return `Alarms.${deviceFolder}.${sub}`;
+                    ? `instanz_${record.instance}`
+                    : 'allgemein';
+            return `alarms.${deviceFolder}.${sub}`;
         }
-        return `Alarms.${this.sanitizeName(record.type || 'Sonstige')}.${this.sanitizeName(record.idAlarm)}`;
+        return `alarms.${this.sanitizeName(record.type || 'sonstige')}.${this.sanitizeName(record.idAlarm)}`;
     }
 
     /**
@@ -266,7 +270,7 @@ class VictronVrm extends utils.Adapter {
             const customName = customNameRecord ? customNameRecord.formattedValue : `Tank ${instanceKey}`;
             
             // Erstelle Channel für diesen Tank mit seinem custom name als Channel-Name
-            const channelId = `Tank.${this.sanitizeName(customName)}`;
+            const channelId = `tank.${this.sanitizeName(customName)}`;
             
             await this.extendObjectAsync(channelId, {
                 type: "channel",
@@ -313,7 +317,7 @@ class VictronVrm extends utils.Adapter {
             const customName = customNameRecord ? customNameRecord.formattedValue : `Temperature sensor ${instanceKey}`;
             
             // Erstelle Channel für diesen Sensor mit seinem custom name als Channel-Name
-            const channelId = `Temperature sensor.${this.sanitizeName(customName)}`;
+            const channelId = `temperature_sensor.${this.sanitizeName(customName)}`;
             
             await this.extendObjectAsync(channelId, {
                 type: "channel",
@@ -357,7 +361,7 @@ class VictronVrm extends utils.Adapter {
      */
     async processGateway(instances) {
         for (const [instanceKey, records] of Object.entries(instances)) {
-            const deviceType = "Gateway";
+            const deviceType = "gateway";
             let channelId = this.sanitizeName(deviceType);
             if (Object.keys(instances).length > 1) {
                 channelId += `_${instanceKey}`;
@@ -371,7 +375,7 @@ class VictronVrm extends utils.Adapter {
             });
             
             // GPS Channel (auf gleicher Ebene wie Gateway)
-            const gpsChannelId = "GPS";
+            const gpsChannelId = "gps";
             await this.extendObjectAsync(gpsChannelId, {
                 type: "channel",
                 common: { name: "GPS" },

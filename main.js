@@ -367,7 +367,7 @@ class VictronVrm extends utils.Adapter {
     /**
      * Holt die PV-Prognose und den Verbrauchs-Forecast
      * Ruft sowohl stündliche Daten (nächste 48h) als auch tägliche Aggregaten 
-     * (Morgen, Übermorgen) ab
+     * (heute, morgen, übermorgen) ab
      */
     async fetchForecastData() {
         try {
@@ -406,13 +406,13 @@ class VictronVrm extends utils.Adapter {
                 this.log.warn("Hourly Forecast: unerwartete Response-Struktur");
             }
 
-            // Abruf tägliche Daten (Morgen, Übermorgen)
-            // Berechne Start auf Mitternacht morgen und Ende auf Ende Übermorgen
-            const tomorrowStart = Math.floor((nowSec + 86400) / 86400) * 86400;
-            const dayAfterTomorrowEnd = tomorrowStart + (2 * 86400);
+            // Abruf tägliche Daten (heute, morgen, übermorgen)
+            // Berechne Start auf Mitternacht heute und Ende auf Ende Übermorgen
+            const todayStart = Math.floor(nowSec / 86400) * 86400;
+            const dayAfterTomorrowEnd = todayStart + (3 * 86400);
             
-            this.log.debug(`Fetching daily forecast from: ${baseUrl}/stats?type=forecast&interval=days&start=${tomorrowStart}&end=${dayAfterTomorrowEnd}`);
-            const dailyResponse = await axios.get(`${baseUrl}/stats?type=forecast&interval=days&start=${tomorrowStart}&end=${dayAfterTomorrowEnd}`, {
+            this.log.debug(`Fetching daily forecast from: ${baseUrl}/stats?type=forecast&interval=days&start=${todayStart}&end=${dayAfterTomorrowEnd}`);
+            const dailyResponse = await axios.get(`${baseUrl}/stats?type=forecast&interval=days&start=${todayStart}&end=${dayAfterTomorrowEnd}`, {
                 headers: this.getHeaders()
             });
 
@@ -506,7 +506,7 @@ class VictronVrm extends utils.Adapter {
 
     /**
      * Verarbeitet tägliche Forecast-Daten: [Timestamp(ms), Value] Array
-     * Speichert Werte als day_1 (morgen), day_2 (übermorgen)
+     * Speichert Werte als day_0 (heute), day_1 (morgen), day_2 (übermorgen)
      */
     async processForecastRecordsDaily(rawEntries, baseChannel) {
         if (!Array.isArray(rawEntries) || rawEntries.length === 0) {
@@ -529,18 +529,18 @@ class VictronVrm extends utils.Adapter {
             return;
         }
 
-        // Schreibe die ersten 2 Tage (Morgen, Übermorgen)
-        for (let i = 0; i < Math.min(entries.length, 2); i++) {
+        // Schreibe die ersten 3 Tage (heute, morgen, übermorgen)
+        for (let i = 0; i < Math.min(entries.length, 3); i++) {
             const entry = entries[i];
             const date = new Date(entry.timestamp * 1000);
             const dateStr = date.toLocaleDateString('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric' });
             
-            const dpId = `${baseChannel}.day_${i + 1}`;
+            const dpId = `${baseChannel}.day_${i}`;
 
             await this.extendObjectAsync(dpId, {
                 type: "state",
                 common: {
-                    name: `${dateStr} (Tag ${i + 1})`,
+                    name: `${dateStr} (Tag ${i})`,
                     type: "number",
                     role: "value.energy",
                     unit: "Wh",
